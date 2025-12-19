@@ -45,7 +45,8 @@ export const api = {
           id: c.id,
           supplierId: c.supplier_id,
           title: c.title,
-          lmsElementId: c.lms_element_id
+          lmsElementId: c.lms_element_id,
+          sifCode: c.sif_code
         })),
         services: (services || []).map(s => ({
           id: s.id,
@@ -144,7 +145,8 @@ export const api = {
             id: data.id,
             supplier_id: data.supplierId,
             title: data.title,
-            lms_element_id: data.lmsElementId
+            lms_element_id: data.lmsElementId,
+            sif_code: data.sifCode
           });
           break;
         case 'DELETE_COURSE':
