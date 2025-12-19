@@ -5,40 +5,41 @@ export enum ViewState {
   CATALOG = 'CATALOG',
   COURSES = 'COURSES',
   PURCHASING = 'PURCHASING',
-  RECONCILIATION = 'RECONCILIATION' // Consuntivazione
+  RECONCILIATION = 'RECONCILIATION'
 }
 
 export interface Supplier {
   id: string;
   name: string;
-  contractNumber: string; // Ex Vat Number
-  isActive: boolean; // Stato Attivo/Inattivo
-  contractValue: number; // Budget totale contrattualizzato
+  contractNumber: string;
+  isActive: boolean;
+  contractValue: number;
   contractStart: string;
   contractEnd: string;
 }
 
 export interface ServiceItem {
   id: string;
-  supplierId: string; // Link to specific Supplier
-  courseId?: string; // Optional: Link to specific Course (Price List Override)
-  name: string; // e.g., "Docenza Senior", "Tutoraggio"
+  supplierId: string;
+  courseId?: string;
+  name: string;
   unitPrice: number;
-  unitType: string; // e.g., "hour", "day", "flat"
+  unitType: string;
 }
 
 export interface Course {
   id: string;
-  supplierId: string; // Link to specific Supplier
+  supplierId: string;
   title: string;
-  lmsElementId: string; // ID Elemento LMS
+  lmsElementId: string;
+  sifCode?: string; // Nuova colonna: Sigla SIF
 }
 
 export interface CourseEdition {
   id: string;
   courseId: string;
-  lmsLessonId: string; // ID Lezione LMS
-  runId: string; // ID RUN
+  lmsLessonId: string;
+  runId: string;
   startDate: string;
   endDate: string;
 }
@@ -59,12 +60,12 @@ export enum RiaStatus {
 
 export interface PurchaseLineItem {
   id: string;
-  editionId: string; // Link to specific edition
-  serviceItemId: string; // Link to price catalog
+  editionId: string;
+  serviceItemId: string;
   plannedQty: number;
-  actualQty: number; // For consuntivazione
-  unitPriceOverride: number; // Allows specific rate per course/edition
-  plannedCost: number; // Snapshot of cost at time of order
+  actualQty: number;
+  unitPriceOverride: number;
+  plannedCost: number;
   actualCost: number; 
 }
 
@@ -72,24 +73,20 @@ export interface PurchaseEm {
   id: string;
   code: string;
   amount: number;
-  editionIds: string[]; // Linked editions
+  editionIds: string[];
 }
 
 export interface PurchaseOrder {
   id: string;
   supplierId: string;
-  title: string; // Nome della scheda acquisto
+  title: string;
   createdAt: string;
   status: WorkflowStatus;
-  
-  // Workflow Codes
-  rdaCode: string; // Richiesta d'Acquisto
-  riaCode: string; // Richiesta Impegno
-  riaStatus: RiaStatus; // Specific RIA lifecycle
-  odaCode: string; // Ordine d'Acquisto
-  
-  ems: PurchaseEm[]; // Changed from simple string[] to object array
-
+  rdaCode: string;
+  riaCode: string;
+  riaStatus: RiaStatus;
+  odaCode: string;
+  ems: PurchaseEm[];
   items: PurchaseLineItem[];
 }
 
