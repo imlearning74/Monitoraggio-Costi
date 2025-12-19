@@ -1,12 +1,12 @@
 import { GoogleGenAI } from "@google/genai";
 import { AppData } from '../types';
 
-const apiKey = process.env.REACT_APP_API_KEY || '';
+const apiKey = process.env.API_KEY || '';
 const ai = new GoogleGenAI({ apiKey });
 
 export const analyzeProcurementData = async (data: AppData): Promise<string> => {
   if (!apiKey) {
-    return "API Key Gemini non configurata (REACT_APP_API_KEY).";
+    return "API Key Gemini non configurata (process.env.API_KEY).";
   }
 
   const supplierSummaries = data.suppliers.map(s => {
@@ -29,11 +29,12 @@ export const analyzeProcurementData = async (data: AppData): Promise<string> => 
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: prompt,
     });
     return response.text || "Nessuna risposta.";
   } catch (error) {
-    return "Errore AI.";
+    console.error("Errore Gemini:", error);
+    return "Errore nell'analisi AI.";
   }
 };
