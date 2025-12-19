@@ -1,11 +1,13 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { AppData } from '../types';
 
-const apiKey = process.env.API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+// Use the API key directly from process.env as per guidelines.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const analyzeProcurementData = async (data: AppData): Promise<string> => {
-  if (!apiKey) {
+  // Guidelines: Assume process.env.API_KEY is pre-configured and accessible.
+  if (!process.env.API_KEY) {
     return "API Key Gemini non configurata (process.env.API_KEY).";
   }
 
@@ -28,10 +30,12 @@ export const analyzeProcurementData = async (data: AppData): Promise<string> => 
   `;
 
   try {
+    // Calling generateContent with the recommended model for basic text analysis tasks.
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
     });
+    // Accessing the .text property directly as it returns the generated string.
     return response.text || "Nessuna risposta.";
   } catch (error) {
     console.error("Errore Gemini:", error);
