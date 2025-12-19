@@ -1,9 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { AppData, Supplier, Course, ServiceItem, CourseEdition, PurchaseOrder, WorkflowStatus, RiaStatus } from '../types';
 
-// Per GitHub Pages/React, usiamo il prefisso REACT_APP_
-const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || '';
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
