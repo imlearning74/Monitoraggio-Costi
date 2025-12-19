@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AppData, Supplier, ServiceItem } from '../types';
-import { Plus, Trash, Filter, Edit, Check, X, Copy, Search, ArrowUpDown, FileText, Power, Upload } from 'lucide-react';
+import { Plus, Trash, Filter, Edit, Check, X, Copy, Search, ArrowUpDown, FileText, Power, Upload, BookOpen } from 'lucide-react';
 import { api } from '../services/apiService';
 import * as XLSX from 'xlsx';
 
@@ -30,6 +30,7 @@ export const SuppliersAndData: React.FC<Props> = ({ data, setData }) => {
   const [serviceForm, setServiceForm] = useState<Partial<ServiceItem>>({});
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [selectedSupplierFilter, setSelectedSupplierFilter] = useState<string>('');
+  const [selectedCourseImportFilter, setSelectedCourseImportFilter] = useState<string>('');
   
   const [showCopyModal, setShowCopyModal] = useState(false);
   const [copySourceId, setCopySourceId] = useState<string>('');
@@ -218,7 +219,6 @@ export const SuppliersAndData: React.FC<Props> = ({ data, setData }) => {
             const ws = wb.Sheets[wsname];
             const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
             
-            // Rimuoviamo l'header (prima riga)
             const dataRows = rows.slice(1).filter(r => r.length > 0 && r[0]);
 
             if (type === 'suppliers') {
@@ -246,6 +246,7 @@ export const SuppliersAndData: React.FC<Props> = ({ data, setData }) => {
                     return {
                         id: crypto.randomUUID(),
                         supplierId: selectedSupplierFilter,
+                        courseId: selectedCourseImportFilter || undefined,
                         name: String(cols[0] || '').trim(),
                         unitPrice: Number(cols[1]) || 0,
                         unitType: String(cols[2] || 'unit').trim()
@@ -418,29 +419,57 @@ export const SuppliersAndData: React.FC<Props> = ({ data, setData }) => {
 
       {activeTab === 'catalog' && (
         <div>
-          <div className="flex flex-col md:flex-row md:items-center gap-4 mb-6 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
-             <div className="flex-1 flex flex-col gap-1">
-                 <label className="text-xs font-bold text-indigo-700">Seleziona Fornitore</label>
-                 <select className="border-indigo-200 rounded-md p-2 bg-white" value={selectedSupplierFilter} onChange={(e) => setSelectedSupplierFilter(e.target.value)}>
-                    <option value="">-- Seleziona per gestire/importare --</option>
-                    {data.suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                 </select>
+          <div className="flex flex-col md:flex-row md:items-end gap-4 mb-6 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+             <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div className="flex flex-col gap-1">
+                    <label className="text-xs font-bold text-indigo-700">1. Seleziona Fornitore</label>
+                    <select 
+                        className="border-indigo-200 rounded-md p-2 bg-white text-sm" 
+                        value={selectedSupplierFilter} 
+                        onChange={(e) => {
+                            setSelectedSupplierFilter(e.target.value);
+                            setSelectedCourseImportFilter(''); // Reset corso quando cambia fornitore
+                        }}
+                    >
+                        <option value="">-- Scegli Fornitore --</option>
+                        {data.suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                 </div>
+                 <div className="flex flex-col gap-1">
+                    <label className="text-xs font-bold text-indigo-700">2. Seleziona Corso (Opzionale)</label>
+                    <select 
+                        className="border-indigo-200 rounded-md p-2 bg-white text-sm disabled:opacity-50" 
+                        value={selectedCourseImportFilter} 
+                        onChange={(e) => setSelectedCourseImportFilter(e.target.value)}
+                        disabled={!selectedSupplierFilter}
+                    >
+                        <option value="">-- Catalogo Generico --</option>
+                        {availableCoursesForSupplier.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+                    </select>
+                 </div>
              </div>
+             
              {selectedSupplierFilter && (
-                 <div className="flex gap-2">
-                    <label className="bg-white border border-indigo-300 text-indigo-700 px-4 py-2 rounded flex items-center gap-2 font-bold text-sm cursor-pointer hover:bg-indigo-50 transition-colors">
-                        <Upload size={16} /> {importing ? '...' : 'Importa Catalogo'}
+                 <div className="flex gap-2 h-[38px]">
+                    <label className="bg-white border border-indigo-300 text-indigo-700 px-4 py-2 rounded flex items-center gap-2 font-bold text-sm cursor-pointer hover:bg-indigo-50 transition-colors shadow-sm">
+                        <Upload size={16} /> {importing ? '...' : 'Importa'}
                         <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => handleFileUpload(e, 'catalog')} className="hidden" disabled={importing}/>
                     </label>
-                    <button onClick={() => setShowCopyModal(!showCopyModal)} className="bg-white border border-indigo-300 text-indigo-700 px-4 py-2 rounded flex items-center gap-2 font-bold text-sm hover:bg-indigo-50 transition-colors">
-                        <Copy size={16} /> Copia da altro
+                    <button onClick={() => setShowCopyModal(!showCopyModal)} className="bg-white border border-indigo-300 text-indigo-700 px-4 py-2 rounded flex items-center gap-2 font-bold text-sm hover:bg-indigo-50 transition-colors shadow-sm">
+                        <Copy size={16} /> Copia
                     </button>
                  </div>
              )}
           </div>
           
+          {selectedCourseImportFilter && (
+              <div className="mb-4 px-3 py-2 bg-blue-50 border border-blue-200 rounded-md flex items-center gap-2 text-blue-700 text-xs font-medium">
+                  <BookOpen size={14}/> Stai importando/visualizzando i costi specifici per il corso: <b>{data.courses.find(c => c.id === selectedCourseImportFilter)?.title}</b>
+              </div>
+          )}
+
            {showCopyModal && selectedSupplierFilter && (
-              <div className="mb-6 p-4 border border-blue-200 bg-blue-50 rounded-lg relative">
+              <div className="mb-6 p-4 border border-blue-200 bg-blue-50 rounded-lg relative shadow-inner">
                   <button onClick={() => setShowCopyModal(false)} className="absolute top-2 right-2 text-gray-400"><X size={16}/></button>
                   <h4 className="font-bold text-sm mb-3">Copia servizi da un altro fornitore</h4>
                   <div className="flex items-center gap-4 mb-4">
@@ -475,8 +504,8 @@ export const SuppliersAndData: React.FC<Props> = ({ data, setData }) => {
                </div>
              ) : (
                 <div className="md:col-span-1">
-                    <label className="text-xs text-blue-700 font-bold">Corso (Opz)</label>
-                    <select className="w-full border p-2 rounded text-sm bg-blue-50" value={serviceForm.courseId || ''} onChange={e => setServiceForm({...serviceForm, courseId: e.target.value})}>
+                    <label className="text-xs text-blue-700 font-bold">Corso (Destinazione)</label>
+                    <select className="w-full border p-2 rounded text-sm bg-blue-50" value={serviceForm.courseId || selectedCourseImportFilter || ''} onChange={e => setServiceForm({...serviceForm, courseId: e.target.value})}>
                         <option value="">-- Generico --</option>
                         {(selectedSupplierFilter ? availableCoursesForSupplier : data.courses.filter(c => c.supplierId === serviceForm.supplierId)).map(c => (
                             <option key={c.id} value={c.id}>{c.title}</option>
@@ -506,18 +535,34 @@ export const SuppliersAndData: React.FC<Props> = ({ data, setData }) => {
 
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                  <tr>
+                      <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Fornitore</th>
+                      <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Servizio</th>
+                      <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Prezzo Unit.</th>
+                      <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Tipo</th>
+                      <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-500 uppercase text-right">Azioni</th>
+                  </tr>
+              </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredServices.length === 0 ? <tr><td colSpan={5} className="py-10 text-center text-gray-400">Nessun servizio presente.</td></tr> : filteredServices.map(s => (
                     <tr key={s.id} className={editingServiceId === s.id ? 'bg-yellow-50' : ''}>
                       <td className="px-3 py-2 text-xs text-gray-500">{data.suppliers.find(sup => sup.id === s.supplierId)?.name}</td>
                       <td className="px-3 py-2 font-medium">
-                          {s.name} {s.courseId && <span className="text-[10px] bg-blue-100 text-blue-700 px-1 rounded ml-1">Specifica</span>}
+                          <div className="flex flex-col">
+                              <span className="text-sm">{s.name}</span>
+                              {s.courseId && (
+                                  <span className="text-[9px] text-blue-600 flex items-center gap-1 font-bold">
+                                      <BookOpen size={10}/> {data.courses.find(c => c.id === s.courseId)?.title}
+                                  </span>
+                              )}
+                          </div>
                       </td>
-                      <td className="px-3 py-2 font-mono">€ {s.unitPrice}</td>
-                      <td className="px-3 py-2 text-xs text-gray-400">{s.unitType}</td>
+                      <td className="px-3 py-2 font-mono text-sm">€ {s.unitPrice.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-xs text-gray-400 uppercase">{s.unitType}</td>
                       <td className="px-3 py-2 flex justify-end gap-2">
-                        <button className="text-blue-500 p-1 hover:bg-blue-50 rounded" onClick={() => startEditingService(s)}><Edit size={16} /></button>
-                        <button className="text-red-500 p-1 hover:bg-red-50 rounded" onClick={() => deleteService(s.id)}><Trash size={16} /></button>
+                        <button className="text-blue-500 p-1 hover:bg-blue-50 rounded transition-colors" title="Modifica" onClick={() => startEditingService(s)}><Edit size={16} /></button>
+                        <button className="text-red-500 p-1 hover:bg-red-50 rounded transition-colors" title="Elimina" onClick={() => deleteService(s.id)}><Trash size={16} /></button>
                       </td>
                     </tr>
                 ))}
