@@ -1,27 +1,12 @@
 import React, { useState } from 'react';
 import { AppData, PurchaseOrder, PurchaseLineItem, WorkflowStatus, RiaStatus, CourseEdition, PurchaseEm } from '../types';
-import { Plus, Trash2, Edit, Save, Copy, Package, Calendar, Hash, X, Search, Filter, BookOpen, Layers, Users, ArrowUpDown } from 'lucide-react';
+import { Plus, Trash2, Edit, Save, Copy, Package, Calendar, Hash, X, Search, Filter, BookOpen, Layers, Users, ArrowUpDown, CheckSquare, Square } from 'lucide-react';
 import { api } from '../services/apiService';
 
 interface PurchasingProps {
   data: AppData;
   setData: React.Dispatch<React.SetStateAction<AppData>>;
   mode: 'workflow' | 'reconciliation';
-}
-
-interface NewEditionForm {
-    courseId: string;
-    runId: string;
-    lmsLessonId: string;
-    startDate: string;
-    endDate: string;
-}
-
-interface CloneEditionForm {
-    sourceId: string;
-    newRunId: string;
-    newStartDate: string;
-    newEndDate: string;
 }
 
 export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) => {
@@ -38,9 +23,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
   const [activeEditionIds, setActiveEditionIds] = useState<string[]>([]);
   
   const [courseToAdd, setCourseToAdd] = useState<string>('');
-  const [newEditionForm, setNewEditionForm] = useState<NewEditionForm>({courseId: '', runId: '', lmsLessonId: '', startDate: '', endDate: ''});
-  const [cloneEditionForm, setCloneEditionForm] = useState<CloneEditionForm | null>(null);
-  
   const [newEmCode, setNewEmCode] = useState('');
   const [newEmSelectedEditions, setNewEmSelectedEditions] = useState<string[]>([]);
 
@@ -110,6 +92,7 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
       actualCost: line.actualQty * line.unitPriceOverride
     }));
 
+    // Re-calculate EM amounts based on the items in those specific editions
     const updatedEms = (editingOrder.ems || []).map(em => {
         const calculatedAmount = updatedItems
             .filter(l => em.editionIds.includes(l.editionId))
@@ -133,11 +116,12 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
   };
 
   const updateEditionDetails = async (editionId: string, field: keyof CourseEdition, value: string) => {
-      setData(prev => ({
-          ...prev,
-          editions: prev.editions.map(e => (e.id === editionId ? { ...e, [field]: value } : e))
-      }));
-      // Persist partial update if needed, but here we rely on full save
+      setData(prev => {
+          const updatedEditions = prev.editions.map(e => (e.id === editionId ? { ...e, [field]: value } : e));
+          const updatedEd = updatedEditions.find(e => e.id === editionId);
+          if (updatedEd) api.mutate('UPSERT_EDITION', updatedEd);
+          return { ...prev, editions: updatedEditions };
+      });
   };
 
   const addLineItem = (editionId: string) => {
@@ -145,7 +129,7 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
       id: crypto.randomUUID(),
       editionId,
       serviceItemId: '',
-      plannedQty: 1,
+      plannedQty: mode === 'reconciliation' ? 0 : 1,
       actualQty: mode === 'reconciliation' ? 1 : 0,
       unitPriceOverride: 0,
       plannedCost: 0,
@@ -163,7 +147,15 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
   };
 
   const handleAddEm = () => {
-      if (!newEmCode) return;
+      if (!newEmCode) {
+          alert("Inserisci un codice EM");
+          return;
+      }
+      if (newEmSelectedEditions.length === 0) {
+          alert("Seleziona almeno un'edizione da associare all'EM");
+          return;
+      }
+      
       const calculatedAmount = selectedLines
         .filter(l => newEmSelectedEditions.includes(l.editionId))
         .reduce((acc, l) => acc + (l.actualQty * l.unitPriceOverride), 0);
@@ -172,11 +164,18 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
           id: crypto.randomUUID(),
           code: newEmCode,
           amount: calculatedAmount, 
-          editionIds: newEmSelectedEditions
+          editionIds: [...newEmSelectedEditions]
       };
 
       setEditingOrder(prev => prev ? ({ ...prev, ems: [...(prev.ems || []), newEm] }) : null);
-      setNewEmCode(''); setNewEmSelectedEditions([]);
+      setNewEmCode(''); 
+      setNewEmSelectedEditions([]);
+  };
+
+  const toggleEditionSelectionForEm = (editionId: string) => {
+      setNewEmSelectedEditions(prev => 
+        prev.includes(editionId) ? prev.filter(id => id !== editionId) : [...prev, editionId]
+      );
   };
 
   const toggleSort = (field: 'createdAt' | 'title' | 'amount') => {
@@ -253,7 +252,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
           </div>
         </div>
 
-        {/* Struttura Dettaglio Corsi/Edizioni */}
         {editingOrder.supplierId && (
             <div className="space-y-8">
                 {/* Sezione EM (solo in riconciliazione) */}
@@ -261,19 +259,45 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                     <div className="bg-green-50 border border-green-200 p-4 rounded-lg shadow-sm">
                         <h3 className="text-lg font-bold text-green-800 mb-4 flex items-center gap-2"><Package size={20}/> Entrate Merci (EM)</h3>
                         <div className="space-y-2 mb-4">
-                            {(editingOrder.ems || []).map(em => (
-                                <div key={em.id} className="bg-white p-3 rounded border flex justify-between items-center shadow-sm">
-                                    <div className="flex gap-4">
-                                        <span className="font-bold text-green-700">{em.code}</span>
-                                        <span className="font-mono">€ {em.amount.toLocaleString()}</span>
+                            {(editingOrder.ems || []).map(em => {
+                                const coveredEditions = em.editionIds.map(eid => data.editions.find(ed => ed.id === eid)?.runId).filter(Boolean).join(', ');
+                                return (
+                                    <div key={em.id} className="bg-white p-3 rounded border flex justify-between items-center shadow-sm">
+                                        <div className="flex flex-col">
+                                            <div className="flex gap-4 items-center">
+                                                <span className="font-bold text-green-700">{em.code}</span>
+                                                <span className="font-mono text-sm">€ {em.amount.toLocaleString()}</span>
+                                            </div>
+                                            <div className="text-[10px] text-gray-400 font-bold uppercase">Edizioni: {coveredEditions || 'Nessuna'}</div>
+                                        </div>
+                                        <button onClick={() => setEditingOrder({...editingOrder, ems: (editingOrder.ems || []).filter(e => e.id !== em.id)})} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
                                     </div>
-                                    <button onClick={() => setEditingOrder({...editingOrder, ems: (editingOrder.ems || []).filter(e => e.id !== em.id)})} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
-                        <div className="flex gap-2">
-                            <input className="flex-1 border p-2 rounded text-sm" placeholder="Codice EM..." value={newEmCode} onChange={e => setNewEmCode(e.target.value)}/>
-                            <button onClick={handleAddEm} className="bg-green-600 text-white px-4 py-2 rounded font-bold text-sm shadow">Aggiungi EM</button>
+                        <div className="bg-white p-3 rounded border border-green-200 mb-4">
+                            <label className="block text-[10px] font-bold text-green-700 uppercase mb-2">1. Seleziona le edizioni da includere in questa EM</label>
+                            <div className="flex flex-wrap gap-2 mb-4">
+                                {activeEditionIds.map(eid => {
+                                    const ed = data.editions.find(e => e.id === eid);
+                                    const isSelected = newEmSelectedEditions.includes(eid);
+                                    return (
+                                        <button 
+                                            key={eid} 
+                                            onClick={() => toggleEditionSelectionForEm(eid)}
+                                            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${isSelected ? 'bg-green-600 text-white border-green-700 shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:border-green-300'}`}
+                                        >
+                                            {isSelected ? <CheckSquare size={14}/> : <Square size={14}/>}
+                                            {ed?.runId || 'Senza ID'}
+                                        </button>
+                                    );
+                                })}
+                                {activeEditionIds.length === 0 && <span className="text-xs text-gray-400 italic">Nessuna edizione presente. Aggiungi un corso ed un'edizione sotto.</span>}
+                            </div>
+                            <div className="flex gap-2">
+                                <input className="flex-1 border p-2 rounded text-sm focus:ring-2 focus:ring-green-500 outline-none" placeholder="Codice EM..." value={newEmCode} onChange={e => setNewEmCode(e.target.value)}/>
+                                <button onClick={handleAddEm} className="bg-green-600 text-white px-6 py-2 rounded font-bold text-sm shadow hover:bg-green-700 transition-colors">Aggiungi EM</button>
+                            </div>
                         </div>
                     </div>
                 )}
@@ -302,21 +326,29 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                                         const lines = selectedLines.filter(l => l.editionId === editionId);
                                         return (
                                             <div key={editionId} className="bg-white p-4 rounded-lg border shadow-sm border-l-4 border-l-blue-500">
-                                                <div className="flex justify-between items-center mb-3 pb-2 border-b border-dashed">
-                                                    <div className="flex items-center gap-4">
-                                                        <div className="flex items-center gap-1 font-bold text-sm bg-gray-100 px-2 py-1 rounded">
+                                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-3 border-b border-dashed">
+                                                    <div className="flex items-center gap-4 flex-wrap">
+                                                        <div className="flex items-center gap-1 font-bold text-sm bg-gray-100 px-2 py-1 rounded border">
                                                             <Hash size={14} className="text-gray-400"/>
-                                                            <input className="bg-transparent border-none outline-none w-24" value={edition?.runId} onChange={e => updateEditionDetails(editionId, 'runId', e.target.value)} />
+                                                            <input 
+                                                                className="bg-transparent border-none outline-none w-32 font-bold text-blue-700" 
+                                                                value={edition?.runId} 
+                                                                placeholder="ID Edizione"
+                                                                onChange={e => updateEditionDetails(editionId, 'runId', e.target.value)} 
+                                                            />
                                                         </div>
-                                                        <div className="text-xs text-gray-500 flex gap-2">
-                                                            <Calendar size={14}/> {edition?.startDate} - {edition?.endDate}
+                                                        <div className="flex items-center gap-2 text-xs font-bold text-gray-600">
+                                                            <Calendar size={14} className="text-blue-500"/>
+                                                            <input type="date" className="border rounded p-1" value={edition?.startDate} onChange={e => updateEditionDetails(editionId, 'startDate', e.target.value)} />
+                                                            <span>al</span>
+                                                            <input type="date" className="border rounded p-1" value={edition?.endDate} onChange={e => updateEditionDetails(editionId, 'endDate', e.target.value)} />
                                                         </div>
                                                     </div>
                                                     {allowManagement && (
                                                         <button onClick={() => {
                                                             setActiveEditionIds(prev => prev.filter(id => id !== editionId));
                                                             setSelectedLines(prev => prev.filter(l => l.editionId !== editionId));
-                                                        }} className="text-red-300 hover:text-red-500"><X size={16}/></button>
+                                                        }} className="text-red-300 hover:text-red-500"><X size={20}/></button>
                                                     )}
                                                 </div>
                                                 <table className="w-full text-sm">
@@ -359,7 +391,7 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                                                         })}
                                                     </tbody>
                                                 </table>
-                                                {allowManagement && <button onClick={() => addLineItem(editionId)} className="mt-2 text-[10px] text-blue-600 font-bold flex items-center gap-1 hover:underline"><Plus size={12}/> Aggiungi Voce</button>}
+                                                {allowManagement && <button onClick={() => addLineItem(editionId)} className="mt-2 text-[10px] text-blue-600 font-bold flex items-center gap-1 hover:underline"><Plus size={12}/> Aggiungi Voce di Costo</button>}
                                             </div>
                                         );
                                     })}
@@ -367,11 +399,11 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                                         <div className="bg-indigo-50 p-3 rounded border border-dashed border-indigo-200 flex items-center justify-between">
                                             <span className="text-xs font-bold text-indigo-700">Aggiungi una nuova edizione per questo corso</span>
                                             <button onClick={async () => {
-                                                const newEd: CourseEdition = { id: crypto.randomUUID(), courseId: courseId!, runId: 'NEW-RUN', startDate: '', endDate: '', lmsLessonId: '' };
+                                                const newEd: CourseEdition = { id: crypto.randomUUID(), courseId: courseId!, runId: 'NEW-RUN-' + (editions.length + 1), startDate: '', endDate: '', lmsLessonId: '' };
                                                 setData(prev => ({...prev, editions: [...prev.editions, newEd]}));
                                                 await api.mutate('UPSERT_EDITION', newEd);
                                                 setActiveEditionIds(prev => [...prev, newEd.id]);
-                                            }} className="bg-indigo-600 text-white text-[10px] px-3 py-1 rounded font-bold shadow-sm">CREA EDIZIONE</button>
+                                            }} className="bg-indigo-600 text-white text-[10px] px-3 py-1 rounded font-bold shadow-sm hover:bg-indigo-700 transition-colors">CREA EDIZIONE</button>
                                         </div>
                                     )}
                                 </div>
@@ -380,7 +412,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                     })}
                 </div>
                 
-                {/* Selezione Corsi da Catalogo */}
                 {allowManagement && (
                     <div className="mt-8 bg-blue-50 p-6 rounded-xl border border-dashed border-blue-300 flex items-center gap-4">
                         <div className="flex-1">
@@ -390,7 +421,7 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                                 {data.courses.filter(c => c.supplierId === editingOrder.supplierId && !activeCourseIds.includes(c.id)).map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                             </select>
                         </div>
-                        <button onClick={() => { if(courseToAdd) setActiveCourseIds([...activeCourseIds, courseToAdd]); setCourseToAdd(''); }} disabled={!courseToAdd} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold shadow-md hover:bg-blue-700 transition-colors h-[42px] mt-5">Aggiungi Corso</button>
+                        <button onClick={() => { if(courseToAdd) setActiveCourseIds([...activeCourseIds, courseToAdd]); setCourseToAdd(''); }} disabled={!courseToAdd} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold shadow-md hover:bg-blue-700 transition-colors h-[42px] mt-5">Associa Corso</button>
                     </div>
                 )}
             </div>
@@ -409,7 +440,8 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
         const sup = data.suppliers.find(s => s.id === o.supplierId)?.name || '';
         const matchesSearch = o.title.toLowerCase().includes(searchTerm.toLowerCase()) || sup.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesStatus = statusFilter === 'ALL' ? true : statusFilter === 'ACTIVE' ? o.status !== WorkflowStatus.CLOSED : o.status === statusFilter;
-        return matchesSearch && matchesStatus;
+        const matchesSupplier = supplierFilter === '' ? true : o.supplierId === supplierFilter;
+        return matchesSearch && matchesStatus && matchesSupplier;
     })
     .sort((a, b) => {
         let aVal: any = a[sortField as keyof PurchaseOrder] || '';
@@ -425,11 +457,20 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
     <div className="space-y-6 animate-fade-in max-w-7xl mx-auto">
       <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4">
         <h2 className="text-2xl font-bold text-gray-800">{mode === 'workflow' ? 'Gestione Acquisti' : 'Consuntivazione'}</h2>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3 items-center">
             <div className="relative">
                 <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
-                <input className="pl-10 pr-4 py-2 border rounded-lg w-64 text-sm" placeholder="Cerca ordine o fornitore..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
+                <input className="pl-10 pr-4 py-2 border rounded-lg w-64 text-sm" placeholder="Cerca ordine..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
             </div>
+            
+            <div className="relative">
+                <Users className="absolute left-3 top-2.5 text-gray-400" size={18} />
+                <select className="pl-10 pr-4 py-2 border rounded-lg text-sm bg-white font-medium min-w-[200px]" value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)}>
+                    <option value="">Tutti i Fornitori</option>
+                    {data.suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+            </div>
+
             <select className="border rounded-lg px-3 py-2 text-sm bg-white font-medium" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
                 <option value="ACTIVE">Schede Attive</option>
                 <option value="ALL">Tutte le schede</option>
@@ -478,7 +519,7 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
             </div>
           );
         })}
-        {sortedOrders.length === 0 && <div className="col-span-full py-12 text-center text-gray-400 bg-gray-50 rounded-xl border border-dashed italic">Nessun ordine trovato.</div>}
+        {sortedOrders.length === 0 && <div className="col-span-full py-12 text-center text-gray-400 bg-gray-50 rounded-xl border border-dashed italic">Nessun ordine trovato con i filtri attuali.</div>}
       </div>
     </div>
   );
