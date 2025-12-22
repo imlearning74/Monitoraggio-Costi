@@ -32,7 +32,7 @@ export interface Course {
   supplierId: string;
   title: string;
   lmsElementId: string;
-  sifCode?: string; // Nuova colonna: Sigla SIF
+  sifCode?: string;
 }
 
 export interface CourseEdition {
@@ -82,6 +82,7 @@ export interface PurchaseOrder {
   title: string;
   createdAt: string;
   status: WorkflowStatus;
+  isGeneric: boolean; // Nuova proprietà
   rdaCode: string;
   riaCode: string;
   riaStatus: RiaStatus;
