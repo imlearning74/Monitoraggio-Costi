@@ -1,6 +1,7 @@
+
 import React, { useState } from 'react';
 import { AppData, PurchaseOrder, PurchaseLineItem, WorkflowStatus, RiaStatus, CourseEdition, PurchaseEm } from '../types';
-import { Plus, Trash2, Edit, Save, Copy, Package, Calendar, Hash, X, Search, Filter, BookOpen, Layers, Users, ArrowUpDown, CheckSquare, Square } from 'lucide-react';
+import { Plus, Trash2, Edit, Save, Copy, Package, Calendar, Hash, X, Search, Filter, BookOpen, Layers, Users, ArrowUpDown, CheckSquare, Square, ClipboardCheck, Activity } from 'lucide-react';
 import { api } from '../services/apiService';
 
 interface PurchasingProps {
@@ -92,7 +93,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
       actualCost: line.actualQty * line.unitPriceOverride
     }));
 
-    // 1. Re-calculate EM amounts based on the current items in those specific editions
     const updatedEms = (editingOrder.ems || []).map(em => {
         const calculatedAmount = updatedItems
             .filter(l => em.editionIds.includes(l.editionId))
@@ -100,7 +100,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
         return { ...em, amount: calculatedAmount };
     });
 
-    // 2. If generic, automatically sync actualAmount with the sum of EM amounts
     let finalActualAmount = editingOrder.actualAmount || 0;
     if (editingOrder.isGeneric && updatedEms.length > 0) {
         finalActualAmount = updatedEms.reduce((acc, em) => acc + em.amount, 0);
@@ -206,11 +205,15 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
 
     return (
       <div className="bg-white p-6 rounded-lg shadow-lg animate-fade-in max-w-5xl mx-auto">
-        {/* Header Modale */}
         <div className="flex justify-between items-start mb-6 border-b pb-4">
            <div>
              <h2 className="text-2xl font-bold text-gray-800">{editingOrder.id ? (mode === 'reconciliation' ? 'Consuntivazione' : 'Gestione Scheda') : 'Nuova Scheda'}</h2>
-             {editingOrder.isGeneric && <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider">Acquisto Generico</span>}
+             <div className="flex gap-2 mt-1">
+                {editingOrder.isGeneric && <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider">Acquisto Generico</span>}
+                <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${editingOrder.status === WorkflowStatus.CLOSED ? 'bg-gray-200 text-gray-700' : 'bg-blue-100 text-blue-700'}`}>
+                    {editingOrder.status}
+                </span>
+             </div>
            </div>
            <div className="text-right">
              <div className="text-sm text-gray-500">Totale {mode === 'reconciliation' ? 'Consuntivato' : 'Pianificato'}</div>
@@ -219,20 +222,49 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
         </div>
         
         {/* Form Dati Testata */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 bg-gray-50 p-4 rounded-lg border">
-          <div className="col-span-2">
-              <label className="block text-sm font-bold text-gray-700 mb-1">Titolo Scheda</label>
-              <input type="text" className="w-full border rounded p-2 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none" value={editingOrder.title} onChange={e => setEditingOrder({...editingOrder, title: e.target.value})}/>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8 bg-gray-50 p-4 rounded-lg border">
+          <div className="md:col-span-2">
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Titolo Scheda</label>
+              <input type="text" className="w-full border rounded p-2 text-sm shadow-sm focus:ring-2 focus:ring-blue-500 outline-none" value={editingOrder.title} onChange={e => setEditingOrder({...editingOrder, title: e.target.value})}/>
           </div>
           <div>
-              <label className="block text-sm font-bold text-gray-700 mb-1">Fornitore</label>
-              <select className="w-full border rounded p-2 disabled:bg-gray-100" value={editingOrder.supplierId} onChange={e => handleSupplierChange(e.target.value)} disabled={mode === 'reconciliation'}>
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Fornitore</label>
+              <select className="w-full border rounded p-2 text-sm disabled:bg-gray-100" value={editingOrder.supplierId} onChange={e => handleSupplierChange(e.target.value)} disabled={mode === 'reconciliation'}>
                 <option value="">-- Seleziona Fornitore --</option>
                 {data.suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
           </div>
+          <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Stato Workflow</label>
+              <select 
+                className={`w-full border rounded p-2 text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none ${editingOrder.status === WorkflowStatus.CLOSED ? 'bg-gray-200' : 'bg-blue-50 text-blue-800'}`}
+                value={editingOrder.status} 
+                onChange={e => setEditingOrder({...editingOrder, status: e.target.value as WorkflowStatus})}
+              >
+                {Object.values(WorkflowStatus).map(status => <option key={status} value={status}>{status}</option>)}
+              </select>
+          </div>
+
+          <div className="md:col-span-1">
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Codice RDA</label>
+              <input type="text" className="w-full border rounded p-2 text-sm" value={editingOrder.rdaCode || ''} onChange={e => setEditingOrder({...editingOrder, rdaCode: e.target.value})} placeholder="Es. RDA-1234"/>
+          </div>
+          <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Stato RIA</label>
+              <select className="w-full border rounded p-2 text-sm" value={editingOrder.riaStatus} onChange={e => setEditingOrder({...editingOrder, riaStatus: e.target.value as RiaStatus})}>
+                {Object.values(RiaStatus).map(status => <option key={status} value={status}>{status || 'Nessuno'}</option>)}
+              </select>
+          </div>
+          <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Codice RIA</label>
+              <input type="text" className="w-full border rounded p-2 text-sm" value={editingOrder.riaCode || ''} onChange={e => setEditingOrder({...editingOrder, riaCode: e.target.value})} placeholder="Es. RIA-5678"/>
+          </div>
+          <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Codice ODA (SAP)</label>
+              <input type="text" className="w-full border rounded p-2 text-sm font-mono" value={editingOrder.odaCode || ''} onChange={e => setEditingOrder({...editingOrder, odaCode: e.target.value})} placeholder="45000..."/>
+          </div>
           
-          <div className="col-span-3 flex flex-col gap-4 bg-white p-4 rounded border shadow-sm">
+          <div className="col-span-1 md:col-span-4 flex flex-col gap-4 bg-white p-4 rounded border shadow-sm">
              <div className="flex items-center gap-2">
                  <button onClick={() => mode === 'workflow' && setEditingOrder({...editingOrder, isGeneric: !editingOrder.isGeneric})}
                     className={`w-10 h-5 rounded-full relative transition-colors ${editingOrder.isGeneric ? 'bg-amber-500' : 'bg-gray-300'} ${mode === 'reconciliation' ? 'cursor-not-allowed opacity-50' : ''}`}>
@@ -252,7 +284,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                             <label className="block text-[10px] font-bold text-green-700 uppercase">Importo Forfettario Consuntivato (€)</label>
                             <input type="number" className="w-full border p-2 rounded text-sm bg-green-50 font-bold" value={editingOrder.actualAmount || 0} 
                                 onChange={e => setEditingOrder({...editingOrder, actualAmount: Number(e.target.value)})}/>
-                            <p className="text-[9px] text-green-600 mt-1 font-bold italic">* Si aggiornerà automaticamente con la somma delle EM al salvataggio</p>
                         </div>
                     )}
                  </div>
@@ -262,7 +293,7 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
 
         {editingOrder.supplierId && (
             <div className="space-y-8">
-                {/* Sezione EM (solo in riconciliazione) */}
+                {/* Sezione EM */}
                 {mode === 'reconciliation' && (
                     <div className="bg-green-50 border border-green-200 p-4 rounded-lg shadow-sm">
                         <h3 className="text-lg font-bold text-green-800 mb-4 flex items-center gap-2"><Package size={20}/> Entrate Merci (EM)</h3>
@@ -300,7 +331,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                                         </button>
                                     );
                                 })}
-                                {activeEditionIds.length === 0 && <span className="text-xs text-gray-400 italic">Nessuna edizione presente. Aggiungi un corso ed un'edizione sotto.</span>}
                             </div>
                             <div className="flex gap-2">
                                 <input className="flex-1 border p-2 rounded text-sm focus:ring-2 focus:ring-green-500 outline-none" placeholder="Codice EM..." value={newEmCode} onChange={e => setNewEmCode(e.target.value)}/>
@@ -387,7 +417,7 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                                                                                     <option key={s.id} value={s.id}>{s.name} - € {s.unitPrice}</option>
                                                                                 ))}
                                                                             </select>
-                                                                        ) : <span className="font-medium">{svc?.name}</span>}
+                                                                        ) : <span className="font-medium text-xs">{svc?.name}</span>}
                                                                     </td>
                                                                     <td><input type="number" className="w-20 border rounded text-xs p-1" value={line.unitPriceOverride} onChange={e => updateLineItem(line.id, 'unitPriceOverride', Number(e.target.value))} /></td>
                                                                     <td><input type="number" className="w-12 border rounded text-xs p-1" value={line.plannedQty} onChange={e => updateLineItem(line.id, 'plannedQty', Number(e.target.value))} /></td>
@@ -468,66 +498,85 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
         <div className="flex flex-wrap gap-3 items-center">
             <div className="relative">
                 <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
-                <input className="pl-10 pr-4 py-2 border rounded-lg w-64 text-sm" placeholder="Cerca ordine..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
+                <input className="pl-10 pr-4 py-2 border rounded-lg w-64 text-sm shadow-sm" placeholder="Cerca ordine..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
             </div>
             
             <div className="relative">
                 <Users className="absolute left-3 top-2.5 text-gray-400" size={18} />
-                <select className="pl-10 pr-4 py-2 border rounded-lg text-sm bg-white font-medium min-w-[200px]" value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)}>
+                <select className="pl-10 pr-4 py-2 border rounded-lg text-sm bg-white font-medium min-w-[200px] shadow-sm" value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)}>
                     <option value="">Tutti i Fornitori</option>
                     {data.suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
             </div>
 
-            <select className="border rounded-lg px-3 py-2 text-sm bg-white font-medium" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+            <select className="border rounded-lg px-3 py-2 text-sm bg-white font-medium shadow-sm" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
                 <option value="ACTIVE">Schede Attive</option>
                 <option value="ALL">Tutte le schede</option>
                 <option value={WorkflowStatus.CLOSED}>Solo Chiuse</option>
             </select>
-            {mode === 'workflow' && <button onClick={handleCreateOrder} className="bg-primary text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 shadow-md hover:bg-black"><Plus size={20} /> Nuova Scheda</button>}
+            {mode === 'workflow' && <button onClick={handleCreateOrder} className="bg-primary text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 shadow-md hover:bg-black transition-all transform hover:scale-105 active:scale-95"><Plus size={20} /> Nuova Scheda</button>}
         </div>
       </div>
 
       <div className="flex gap-4 items-center bg-gray-100 p-2 rounded-lg border">
-          <span className="text-xs font-bold text-gray-500 uppercase ml-2 flex items-center gap-1"><ArrowUpDown size={14}/> Ordina per:</span>
-          <button onClick={() => toggleSort('createdAt')} className={`px-3 py-1 rounded text-xs font-bold transition-all ${sortField === 'createdAt' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 shadow-sm'}`}>Data</button>
-          <button onClick={() => toggleSort('title')} className={`px-3 py-1 rounded text-xs font-bold transition-all ${sortField === 'title' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 shadow-sm'}`}>Titolo</button>
-          <button onClick={() => toggleSort('amount')} className={`px-3 py-1 rounded text-xs font-bold transition-all ${sortField === 'amount' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 shadow-sm'}`}>Importo</button>
+          <span className="text-[10px] font-bold text-gray-500 uppercase ml-2 flex items-center gap-1"><ArrowUpDown size={14}/> Ordina per:</span>
+          <button onClick={() => toggleSort('createdAt')} className={`px-3 py-1 rounded text-xs font-bold transition-all ${sortField === 'createdAt' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 shadow-sm'}`}>Data</button>
+          <button onClick={() => toggleSort('title')} className={`px-3 py-1 rounded text-xs font-bold transition-all ${sortField === 'title' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 shadow-sm'}`}>Titolo</button>
+          <button onClick={() => toggleSort('amount')} className={`px-3 py-1 rounded text-xs font-bold transition-all ${sortField === 'amount' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 shadow-sm'}`}>Importo</button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {sortedOrders.map(order => {
           const supplier = data.suppliers.find(s => s.id === order.supplierId);
           const totalPlan = order.isGeneric ? Math.max(order.plannedAmount || 0, order.items.reduce((s,i) => s+i.plannedCost, 0)) : order.items.reduce((s,i) => s+i.plannedCost, 0);
           const totalAct = order.isGeneric ? (order.items.reduce((s,i) => s+i.actualCost, 0) > 0 ? order.items.reduce((s,i) => s+i.actualCost, 0) : order.actualAmount) : order.items.reduce((s,i) => s+i.actualCost, 0);
 
           return (
-            <div key={order.id} className="bg-white p-5 rounded-xl shadow-sm border relative group overflow-hidden hover:shadow-md transition-shadow">
+            <div key={order.id} className={`bg-white p-5 rounded-2xl shadow-sm border-2 relative group overflow-hidden hover:shadow-xl transition-all duration-300 ${order.status === WorkflowStatus.CLOSED ? 'border-gray-100 grayscale-[0.5]' : 'border-transparent hover:border-blue-100'}`}>
               {order.isGeneric && <div className="absolute top-0 right-0 bg-amber-500 text-white text-[8px] font-bold px-4 py-1 rotate-45 translate-x-3 -translate-y-1 uppercase tracking-tighter shadow-sm">Generica</div>}
               
               <div className="mb-4">
-                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${order.status === WorkflowStatus.CLOSED ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-700'}`}>{order.status}</span>
-                 <h3 className="font-bold text-lg mt-1 text-gray-800 line-clamp-1">{order.title}</h3>
-                 <p className="text-xs text-gray-500 font-semibold flex items-center gap-1 uppercase tracking-tight"><Users size={12}/> {supplier?.name || 'Fornitore non assegnato'}</p>
+                 <div className="flex justify-between items-start mb-2">
+                    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${order.status === WorkflowStatus.CLOSED ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-700'}`}>
+                        {order.status}
+                    </span>
+                    {order.riaStatus && (
+                        <span className="text-[9px] font-black bg-purple-100 text-purple-700 px-2 py-0.5 rounded border border-purple-200">
+                            RIA: {order.riaStatus}
+                        </span>
+                    )}
+                 </div>
+                 <h3 className="font-bold text-lg text-gray-800 line-clamp-2 leading-tight mb-1">{order.title}</h3>
+                 <p className="text-xs text-gray-500 font-semibold flex items-center gap-1.5 uppercase tracking-tight">
+                    <Users size={12} className="text-blue-400"/> {supplier?.name || 'Fornitore non assegnato'}
+                 </p>
               </div>
 
-              <div className="flex justify-between border-t pt-4 items-end">
-                 <div className="space-y-1">
-                    <span className="text-[10px] text-gray-400 block font-bold uppercase">Budget Pianificato</span>
-                    <span className="font-bold text-blue-600">€ {totalPlan.toLocaleString()}</span>
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                  <div className="bg-gray-50 p-2 rounded-lg border border-gray-100">
+                      <span className="text-[9px] text-gray-400 block font-bold uppercase mb-0.5">Budget Pianificato</span>
+                      <span className="font-bold text-sm text-blue-600">€ {totalPlan.toLocaleString()}</span>
+                  </div>
+                  <div className={`p-2 rounded-lg border ${totalAct > 0 ? 'bg-green-50 border-green-100' : 'bg-gray-50 border-gray-100 opacity-50'}`}>
+                      <span className="text-[9px] text-gray-400 block font-bold uppercase mb-0.5">Consuntivato</span>
+                      <span className={`font-bold text-sm ${totalAct > 0 ? 'text-green-600' : 'text-gray-400'}`}>€ {totalAct.toLocaleString()}</span>
+                  </div>
+              </div>
+
+              <div className="flex justify-between items-center border-t pt-4">
+                 <div className="flex flex-col">
+                    <span className="text-[9px] text-gray-400 font-bold uppercase">Data Creazione</span>
+                    <span className="text-xs font-medium text-gray-600">{new Date(order.createdAt).toLocaleDateString()}</span>
                  </div>
-                 {totalAct > 0 && (
-                    <div className="space-y-1 text-right">
-                        <span className="text-[10px] text-gray-400 block font-bold uppercase">Consuntivato</span>
-                        <span className="font-bold text-green-600">€ {totalAct.toLocaleString()}</span>
-                    </div>
-                 )}
-                 <button onClick={() => handleEditOrder(order)} className="bg-gray-50 hover:bg-blue-600 hover:text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1 transition-all border shadow-sm"><Edit size={14}/> {mode === 'reconciliation' ? 'Consuntiva' : 'Gestisci'}</button>
+                 <button onClick={() => handleEditOrder(order)} className="bg-gray-900 text-white hover:bg-blue-600 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-md active:scale-95">
+                    {mode === 'reconciliation' ? <ClipboardCheck size={14}/> : <Activity size={14}/>}
+                    {mode === 'reconciliation' ? 'Consuntiva' : 'Gestisci'}
+                 </button>
               </div>
             </div>
           );
         })}
-        {sortedOrders.length === 0 && <div className="col-span-full py-12 text-center text-gray-400 bg-gray-50 rounded-xl border border-dashed italic">Nessun ordine trovato con i filtri attuali.</div>}
+        {sortedOrders.length === 0 && <div className="col-span-full py-20 text-center text-gray-400 bg-gray-50 rounded-2xl border-2 border-dashed italic">Nessun ordine trovato con i filtri attuali.</div>}
       </div>
     </div>
   );
