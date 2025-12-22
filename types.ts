@@ -82,7 +82,9 @@ export interface PurchaseOrder {
   title: string;
   createdAt: string;
   status: WorkflowStatus;
-  isGeneric: boolean; // Nuova proprietà
+  isGeneric: boolean;
+  plannedAmount: number; 
+  actualAmount: number;  
   rdaCode: string;
   riaCode: string;
   riaStatus: RiaStatus;
