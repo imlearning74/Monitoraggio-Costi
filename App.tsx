@@ -5,8 +5,9 @@ import { Dashboard } from './components/Dashboard';
 import { SuppliersAndData } from './components/SuppliersAndData';
 import { Courses } from './components/Courses';
 import { Purchasing } from './components/Purchasing';
-import { LayoutDashboard, Users, BookOpen, ShoppingCart, BarChart3, Menu, Loader2 } from 'lucide-react';
-import { api } from './services/apiService';
+import { Login } from './components/Login';
+import { LayoutDashboard, Users, BookOpen, ShoppingCart, BarChart3, Menu, Loader2, LogOut } from 'lucide-react';
+import { api, supabase } from './services/apiService';
 
 const INITIAL_DATA: AppData = {
   suppliers: [],
@@ -21,20 +22,49 @@ function App() {
   const [data, setData] = useState<AppData>(INITIAL_DATA);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  // Load Data from Database on Mount
+  // Monitor Auth State
   useEffect(() => {
-    const fetchData = async () => {
-      const dbData = await api.loadData();
-      if (dbData) {
-        setData(dbData);
+    const checkAuth = async () => {
+      const session = await api.auth.getSession();
+      setIsAuthenticated(!!session);
+      
+      if (session) {
+        await fetchData();
       } else {
-        console.log("Using Empty State or Fallback");
+        setLoading(false);
       }
-      setLoading(false);
     };
-    fetchData();
+
+    checkAuth();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuthenticated(!!session);
+      if (session) {
+        fetchData();
+      } else {
+        setLoading(false);
+        setData(INITIAL_DATA);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  const fetchData = async () => {
+    setLoading(true);
+    const dbData = await api.loadData();
+    if (dbData) {
+      setData(dbData);
+    }
+    setLoading(false);
+  };
+
+  const handleLogout = async () => {
+    await api.auth.signOut();
+  };
 
   const NavItem = ({ view, icon: Icon, label }: { view: ViewState, icon: any, label: string }) => (
     <button
@@ -49,10 +79,16 @@ function App() {
   );
 
   if (loading) {
-      return <div className="h-screen w-full flex items-center justify-center flex-col gap-4 text-gray-500">
-          <Loader2 className="animate-spin h-8 w-8 text-blue-600"/>
-          <p>Caricamento dati dal Database...</p>
-      </div>;
+    return (
+      <div className="h-screen w-full flex items-center justify-center flex-col gap-4 text-gray-500 bg-primary">
+        <Loader2 className="animate-spin h-10 w-10 text-blue-500"/>
+        <p className="text-gray-400 font-medium tracking-wide">Inizializzazione sessione...</p>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
   }
 
   return (
@@ -70,8 +106,16 @@ function App() {
           <NavItem view={ViewState.PURCHASING} icon={ShoppingCart} label="Acquisti & Workflow" />
           <NavItem view={ViewState.RECONCILIATION} icon={BarChart3} label="Consuntivazione" />
         </nav>
-        <div className="p-4 border-t border-gray-700 text-xs text-gray-400">
-          {sidebarOpen && <p>&copy; 2023 Monitoraggio Costi</p>}
+        
+        <div className="p-4 border-t border-gray-700">
+          <button 
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-4 py-3 text-left text-red-400 hover:bg-red-500/10 transition-colors rounded-lg font-bold text-sm"
+          >
+            <LogOut size={20} />
+            {sidebarOpen && <span>Esci</span>}
+          </button>
+          {sidebarOpen && <p className="mt-4 text-[10px] text-gray-500 text-center uppercase tracking-widest">&copy; 2024 MC System</p>}
         </div>
       </aside>
 
@@ -86,7 +130,13 @@ function App() {
             {currentView === ViewState.RECONCILIATION && 'Consuntivi & Chiusure'}
           </h2>
           <div className="flex items-center gap-3">
-             <div className="h-8 w-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold">U</div>
+             <div className="text-right mr-2 hidden md:block">
+                <p className="text-xs font-bold text-gray-800">Utente Autorizzato</p>
+                <p className="text-[10px] text-green-600 font-bold uppercase tracking-tight flex items-center justify-end gap-1">
+                  <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div> Sessione Attiva
+                </p>
+             </div>
+             <div className="h-10 w-10 bg-indigo-100 border border-indigo-200 rounded-full flex items-center justify-center text-indigo-700 font-bold shadow-inner">U</div>
           </div>
         </header>
 
