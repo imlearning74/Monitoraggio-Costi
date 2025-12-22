@@ -6,7 +6,7 @@ import { SuppliersAndData } from './components/SuppliersAndData';
 import { Courses } from './components/Courses';
 import { Purchasing } from './components/Purchasing';
 import { Login } from './components/Login';
-import { LayoutDashboard, Users, BookOpen, ShoppingCart, BarChart3, Menu, Loader2, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, BookOpen, ShoppingCart, BarChart3, Menu, Loader2, LogOut, ShieldCheck, Lock } from 'lucide-react';
 import { api, supabase } from './services/apiService';
 
 const INITIAL_DATA: AppData = {
@@ -23,12 +23,13 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
-  // Monitor Auth State
   useEffect(() => {
     const checkAuth = async () => {
       const session = await api.auth.getSession();
       setIsAuthenticated(!!session);
+      setUserEmail(session?.user?.email || null);
       
       if (session) {
         await fetchData();
@@ -39,9 +40,9 @@ function App() {
 
     checkAuth();
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsAuthenticated(!!session);
+      setUserEmail(session?.user?.email || null);
       if (session) {
         fetchData();
       } else {
@@ -69,20 +70,25 @@ function App() {
   const NavItem = ({ view, icon: Icon, label }: { view: ViewState, icon: any, label: string }) => (
     <button
       onClick={() => setCurrentView(view)}
-      className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
-        currentView === view ? 'bg-accent text-white' : 'text-gray-300 hover:bg-secondary'
+      className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-all ${
+        currentView === view 
+          ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20 translate-x-1' 
+          : 'text-gray-400 hover:bg-white/5 hover:text-white'
       }`}
     >
       <Icon size={20} />
-      {sidebarOpen && <span>{label}</span>}
+      {sidebarOpen && <span className="font-medium">{label}</span>}
     </button>
   );
 
   if (loading) {
     return (
       <div className="h-screen w-full flex items-center justify-center flex-col gap-4 text-gray-500 bg-primary">
-        <Loader2 className="animate-spin h-10 w-10 text-blue-500"/>
-        <p className="text-gray-400 font-medium tracking-wide">Inizializzazione sessione...</p>
+        <div className="relative">
+          <Loader2 className="animate-spin h-12 w-12 text-blue-500"/>
+          <Lock className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-4 w-4 text-white opacity-50" />
+        </div>
+        <p className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">Verifica Crittografia Sessione...</p>
       </div>
     );
   }
@@ -92,60 +98,82 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-100 font-sans">
+    <div className="flex h-screen bg-gray-50 font-sans">
       {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-primary text-white transition-all duration-300 flex flex-col shadow-xl z-10`}>
-        <div className="p-4 flex items-center justify-between border-b border-gray-700">
-           {sidebarOpen ? <h1 className="text-xl font-bold tracking-tight">Monitoraggio<span className="text-accent">Costi</span></h1> : <h1 className="text-xl font-bold">MC</h1>}
-           <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-gray-400 hover:text-white"><Menu size={20}/></button>
+      <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-primary text-white transition-all duration-300 flex flex-col shadow-2xl z-20`}>
+        <div className="p-6 flex items-center justify-between border-b border-white/5">
+           {sidebarOpen ? (
+             <h1 className="text-xl font-bold tracking-tight">Monitoraggio<span className="text-blue-500">Costi</span></h1>
+           ) : (
+             <h1 className="text-xl font-bold text-blue-500 text-center w-full">MC</h1>
+           )}
         </div>
-        <nav className="flex-1 mt-6 space-y-1">
+        <nav className="flex-1 mt-6 px-3 space-y-1">
           <NavItem view={ViewState.DASHBOARD} icon={LayoutDashboard} label="Dashboard" />
-          <NavItem view={ViewState.SUPPLIERS} icon={Users} label="Fornitori & Catalogo" />
-          <NavItem view={ViewState.COURSES} icon={BookOpen} label="Corsi & Edizioni" />
-          <NavItem view={ViewState.PURCHASING} icon={ShoppingCart} label="Acquisti & Workflow" />
-          <NavItem view={ViewState.RECONCILIATION} icon={BarChart3} label="Consuntivazione" />
+          <NavItem view={ViewState.SUPPLIERS} icon={Users} label="Anagrafiche" />
+          <NavItem view={ViewState.COURSES} icon={BookOpen} label="Catalogo" />
+          <NavItem view={ViewState.PURCHASING} icon={ShoppingCart} label="Ordini" />
+          <NavItem view={ViewState.RECONCILIATION} icon={BarChart3} label="Consuntivi" />
         </nav>
         
-        <div className="p-4 border-t border-gray-700">
+        <div className="p-4 border-t border-white/5">
           <button 
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 text-left text-red-400 hover:bg-red-500/10 transition-colors rounded-lg font-bold text-sm"
+            className="w-full flex items-center gap-3 px-4 py-3 text-left text-red-400 hover:bg-red-500/10 transition-colors rounded-xl font-bold text-sm mb-4"
           >
             <LogOut size={20} />
-            {sidebarOpen && <span>Esci</span>}
+            {sidebarOpen && <span>Esci dal sistema</span>}
           </button>
-          {sidebarOpen && <p className="mt-4 text-[10px] text-gray-500 text-center uppercase tracking-widest">&copy; 2024 MC System</p>}
+          <button 
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="w-full flex items-center justify-center p-2 bg-white/5 rounded-lg text-gray-400 hover:text-white transition-colors"
+          >
+            <Menu size={20}/>
+          </button>
+          {sidebarOpen && <p className="mt-4 text-[9px] text-gray-600 text-center uppercase font-bold tracking-[0.2em]">Procurement System 1.1</p>}
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        <header className="bg-white shadow-sm p-4 flex justify-between items-center sticky top-0 z-0">
-          <h2 className="text-lg font-semibold text-gray-800">
-            {currentView === ViewState.DASHBOARD && 'Panoramica'}
-            {currentView === ViewState.SUPPLIERS && 'Gestione Dati'}
-            {currentView === ViewState.COURSES && 'Offerta Formativa'}
-            {currentView === ViewState.PURCHASING && 'Gestione Ordini'}
-            {currentView === ViewState.RECONCILIATION && 'Consuntivi & Chiusure'}
-          </h2>
+      <main className="flex-1 overflow-auto flex flex-col">
+        <header className="bg-white/80 backdrop-blur-md border-b p-4 px-8 flex justify-between items-center sticky top-0 z-10">
           <div className="flex items-center gap-3">
-             <div className="text-right mr-2 hidden md:block">
-                <p className="text-xs font-bold text-gray-800">Utente Autorizzato</p>
-                <p className="text-[10px] text-green-600 font-bold uppercase tracking-tight flex items-center justify-end gap-1">
-                  <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div> Sessione Attiva
-                </p>
+            <h2 className="text-xl font-bold text-gray-800 tracking-tight">
+              {currentView === ViewState.DASHBOARD && 'Dashboard Finanziaria'}
+              {currentView === ViewState.SUPPLIERS && 'Fornitori & Servizi'}
+              {currentView === ViewState.COURSES && 'Offerta Formativa'}
+              {currentView === ViewState.PURCHASING && 'Gestione Acquisti'}
+              {currentView === ViewState.RECONCILIATION && 'Consuntivazione Merci'}
+            </h2>
+          </div>
+          
+          <div className="flex items-center gap-4">
+             <div className="text-right hidden sm:block">
+                <p className="text-xs font-bold text-gray-800">{userEmail?.split('@')[0] || 'Amministratore'}</p>
+                <div className="flex items-center justify-end gap-1.5">
+                   <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                   </span>
+                   <p className="text-[9px] text-green-600 font-black uppercase tracking-widest flex items-center gap-1">
+                     <ShieldCheck size={10} /> Connessione Cifrata
+                   </p>
+                </div>
              </div>
-             <div className="h-10 w-10 bg-indigo-100 border border-indigo-200 rounded-full flex items-center justify-center text-indigo-700 font-bold shadow-inner">U</div>
+             <div className="h-10 w-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-blue-500/20">
+                {userEmail?.[0].toUpperCase() || 'A'}
+             </div>
           </div>
         </header>
 
-        <div className="p-6 max-w-7xl mx-auto">
-          {currentView === ViewState.DASHBOARD && <Dashboard data={data} />}
-          {currentView === ViewState.SUPPLIERS && <SuppliersAndData data={data} setData={setData} />}
-          {currentView === ViewState.COURSES && <Courses data={data} setData={setData} />}
-          {currentView === ViewState.PURCHASING && <Purchasing data={data} setData={setData} mode="workflow" />}
-          {currentView === ViewState.RECONCILIATION && <Purchasing data={data} setData={setData} mode="reconciliation" />}
+        <div className="p-8 flex-1">
+          <div className="max-w-7xl mx-auto">
+            {currentView === ViewState.DASHBOARD && <Dashboard data={data} />}
+            {currentView === ViewState.SUPPLIERS && <SuppliersAndData data={data} setData={setData} />}
+            {currentView === ViewState.COURSES && <Courses data={data} setData={setData} />}
+            {currentView === ViewState.PURCHASING && <Purchasing data={data} setData={setData} mode="workflow" />}
+            {currentView === ViewState.RECONCILIATION && <Purchasing data={data} setData={setData} mode="reconciliation" />}
+          </div>
         </div>
       </main>
     </div>
