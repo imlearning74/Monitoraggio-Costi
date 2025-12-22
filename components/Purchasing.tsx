@@ -92,7 +92,7 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
       actualCost: line.actualQty * line.unitPriceOverride
     }));
 
-    // Re-calculate EM amounts based on the items in those specific editions
+    // 1. Re-calculate EM amounts based on the current items in those specific editions
     const updatedEms = (editingOrder.ems || []).map(em => {
         const calculatedAmount = updatedItems
             .filter(l => em.editionIds.includes(l.editionId))
@@ -100,10 +100,17 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
         return { ...em, amount: calculatedAmount };
     });
 
+    // 2. If generic, automatically sync actualAmount with the sum of EM amounts
+    let finalActualAmount = editingOrder.actualAmount || 0;
+    if (editingOrder.isGeneric && updatedEms.length > 0) {
+        finalActualAmount = updatedEms.reduce((acc, em) => acc + em.amount, 0);
+    }
+
     const finalOrder = {
       ...editingOrder,
       ems: updatedEms,
-      items: updatedItems
+      items: updatedItems,
+      actualAmount: finalActualAmount
     } as PurchaseOrder;
 
     setData(prev => {
@@ -245,6 +252,7 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                             <label className="block text-[10px] font-bold text-green-700 uppercase">Importo Forfettario Consuntivato (€)</label>
                             <input type="number" className="w-full border p-2 rounded text-sm bg-green-50 font-bold" value={editingOrder.actualAmount || 0} 
                                 onChange={e => setEditingOrder({...editingOrder, actualAmount: Number(e.target.value)})}/>
+                            <p className="text-[9px] text-green-600 mt-1 font-bold italic">* Si aggiornerà automaticamente con la somma delle EM al salvataggio</p>
                         </div>
                     )}
                  </div>
