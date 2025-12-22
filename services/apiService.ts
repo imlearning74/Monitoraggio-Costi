@@ -1,12 +1,26 @@
+
 import { createClient } from '@supabase/supabase-js';
 import { AppData, Supplier, Course, ServiceItem, CourseEdition, PurchaseOrder, WorkflowStatus, RiaStatus } from '../types';
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export const api = {
+  auth: {
+    signIn: async (email: string, pass: string) => {
+      return await supabase.auth.signInWithPassword({ email, password: pass });
+    },
+    signOut: async () => {
+      return await supabase.auth.signOut();
+    },
+    getSession: async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      return session;
+    }
+  },
+
   loadData: async (): Promise<AppData | null> => {
     try {
       const [
