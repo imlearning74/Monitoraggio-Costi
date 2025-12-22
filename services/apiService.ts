@@ -96,6 +96,8 @@ export const api = {
             createdAt: o.created_at || '',
             status: o.status as WorkflowStatus,
             isGeneric: o.is_generic || false,
+            plannedAmount: Number(o.planned_amount || 0),
+            actualAmount: Number(o.actual_amount || 0),
             rdaCode: o.rda_code || '',
             riaCode: o.ria_code || '',
             riaStatus: o.ria_status as RiaStatus || RiaStatus.NONE,
@@ -147,7 +149,7 @@ export const api = {
             supplier_id: data.supplierId,
             title: data.title,
             lms_element_id: data.lmsElementId,
-            sif_code: data.sifCode
+            sif_code: data.sif_code
           });
           break;
         case 'DELETE_COURSE':
@@ -171,6 +173,8 @@ export const api = {
             created_at: data.createdAt,
             status: data.status,
             is_generic: data.isGeneric,
+            planned_amount: data.plannedAmount,
+            actual_amount: data.actualAmount,
             rda_code: data.rdaCode,
             ria_code: data.riaCode,
             ria_status: data.riaStatus,
