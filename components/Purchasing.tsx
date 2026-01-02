@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppData, PurchaseOrder, PurchaseLineItem, WorkflowStatus, RiaStatus, CourseEdition, PurchaseEm } from '../types';
-import { Plus, Trash2, Save, Package, Calendar, Hash, X, Search, BookOpen, Users, ArrowUpDown, CheckSquare, Square, ClipboardCheck, Activity, CloudCheck, CloudUpload, AlertCircle, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Save, Package, Calendar, Hash, X, Search, BookOpen, Users, ArrowUpDown, CheckSquare, Square, ClipboardCheck, Activity, CloudCheck, CloudUpload, AlertCircle, Loader2, Calculator } from 'lucide-react';
 import { api } from '../services/apiService';
 
 interface PurchasingProps {
@@ -109,8 +109,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
       items: []
     };
     
-    // Non salviamo immediatamente nel DB perché manca il supplierId (vincolo del DB)
-    // Ma impostiamo lo stato editing
     setEditingOrder(newOrder);
     setSelectedLines([]);
     setActiveCourseIds([]);
@@ -141,7 +139,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
     setActiveCourseIds([]);
     setActiveEditionIds([]);
     
-    // Al cambio fornitore forziamo un salvataggio immediato se abbiamo il supplierId
     if (supplierId) {
         const full = getFullOrderForSave(updated, []);
         setData(prev => ({...prev, orders: [...prev.orders, full]}));
@@ -150,7 +147,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
     }
   };
 
-  // Funzione per aggiornare campi di testata con autosave
   const updateOrderField = (field: keyof PurchaseOrder, value: any) => {
     if (!editingOrder) return;
     const updated = { ...editingOrder, [field]: value };
@@ -256,7 +252,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
     triggerAutoSave(updatedOrder, selectedLines);
   };
 
-  // Fix: Adding missing function toggleEditionSelectionForEm
   const toggleEditionSelectionForEm = (editionId: string) => {
     setNewEmSelectedEditions(prev => 
       prev.includes(editionId) 
@@ -265,7 +260,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
     );
   };
 
-  // Fix: Adding missing function toggleSort
   const toggleSort = (field: 'createdAt' | 'title' | 'amount') => {
     if (sortField === field) {
       setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
@@ -273,6 +267,14 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
       setSortField(field);
       setSortDirection('asc');
     }
+  };
+
+  const calculateTotal = (items: PurchaseLineItem[], type: 'planned' | 'actual') => {
+    return items.reduce((acc, item) => {
+       const price = item.unitPriceOverride || 0;
+       const qty = type === 'planned' ? item.plannedQty : item.actualQty;
+       return acc + (qty * price);
+    }, 0);
   };
 
   if (editingOrder) {
@@ -293,7 +295,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                 <h2 className="text-2xl font-bold text-gray-800">
                     {editingOrder.id ? (mode === 'reconciliation' ? 'Consuntivazione' : 'Gestione Scheda') : 'Nuova Scheda'}
                 </h2>
-                {/* Autosave Indicator */}
                 <div className="flex items-center gap-1.5 px-3 py-1 bg-gray-50 border rounded-full">
                     {saveStatus === 'saving' && (
                         <>
@@ -346,7 +347,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                 <option value="">-- Seleziona Fornitore --</option>
                 {data.suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
-              {editingOrder.supplierId && mode !== 'reconciliation' && <p className="text-[9px] text-gray-400 mt-1 italic">* Fornitore bloccato dopo la selezione per coerenza dati.</p>}
           </div>
           <div>
               <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Stato Workflow</label>
@@ -465,23 +465,42 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                         const course = data.courses.find(c => c.id === courseId);
                         const editions = activeEditionIds.filter(eid => data.editions.find(e => e.id === eid)?.courseId === courseId);
                         
+                        // Calcolo subtotale dinamico per questo corso
+                        const courseSubtotal = selectedLines
+                            .filter(l => editions.includes(l.editionId))
+                            .reduce((acc, l) => acc + (mode === 'reconciliation' ? l.actualQty * l.unitPriceOverride : l.plannedQty * l.unitPriceOverride), 0);
+
                         return (
-                            <div key={courseId} className="border border-gray-300 rounded-xl overflow-hidden bg-white shadow-sm">
-                                <div className="bg-gray-100 p-4 flex justify-between items-center border-b">
-                                    <h4 className="font-bold text-lg text-gray-800">{course?.title}</h4>
-                                    {allowManagement && (
-                                        <button onClick={() => {
-                                            const updatedCourseIds = activeCourseIds.filter(id => id !== courseId);
-                                            const editionsToRemove = activeEditionIds.filter(eid => data.editions.find(e => e.id === eid)?.courseId === courseId);
-                                            const updatedEditionIds = activeEditionIds.filter(eid => !editionsToRemove.includes(eid));
-                                            const updatedLines = selectedLines.filter(l => !editionsToRemove.includes(l.editionId));
-                                            
-                                            setActiveCourseIds(updatedCourseIds);
-                                            setActiveEditionIds(updatedEditionIds);
-                                            setSelectedLines(updatedLines);
-                                            triggerAutoSave(editingOrder, updatedLines);
-                                        }} className="text-red-400 hover:text-red-600"><Trash2 size={18} /></button>
-                                    )}
+                            <div key={courseId} className="border border-gray-300 rounded-xl overflow-hidden bg-white shadow-sm transition-all duration-300">
+                                <div className="bg-gray-100 p-4 flex flex-col md:flex-row justify-between items-start md:items-center border-b gap-3">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-blue-600 text-white rounded-lg shadow-inner">
+                                            <Calculator size={18}/>
+                                        </div>
+                                        <h4 className="font-bold text-lg text-gray-800">{course?.title}</h4>
+                                    </div>
+                                    
+                                    <div className="flex items-center gap-4 ml-auto md:ml-0">
+                                        <div className="flex flex-col items-end">
+                                            <span className="text-[9px] font-black uppercase text-gray-400 leading-none mb-1">Subtotale {mode === 'reconciliation' ? 'Consuntivo' : 'Pianificato'}</span>
+                                            <div className="bg-white border-2 border-blue-100 px-4 py-1 rounded-full shadow-sm">
+                                                <span className="font-bold text-blue-700 text-base">€ {courseSubtotal.toLocaleString()}</span>
+                                            </div>
+                                        </div>
+                                        {allowManagement && (
+                                            <button onClick={() => {
+                                                const updatedCourseIds = activeCourseIds.filter(id => id !== courseId);
+                                                const editionsToRemove = activeEditionIds.filter(eid => data.editions.find(e => e.id === eid)?.courseId === courseId);
+                                                const updatedEditionIds = activeEditionIds.filter(eid => !editionsToRemove.includes(eid));
+                                                const updatedLines = selectedLines.filter(l => !editionsToRemove.includes(l.editionId));
+                                                
+                                                setActiveCourseIds(updatedCourseIds);
+                                                setActiveEditionIds(updatedEditionIds);
+                                                setSelectedLines(updatedLines);
+                                                triggerAutoSave(editingOrder, updatedLines);
+                                            }} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"><Trash2 size={18} /></button>
+                                        )}
+                                    </div>
                                 </div>
                                 <div className="p-4 space-y-4 bg-gray-50/50">
                                     {editions.map(editionId => {
@@ -574,7 +593,6 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                                                 setData(prev => ({...prev, editions: [...prev.editions, newEd]}));
                                                 await api.mutate('UPSERT_EDITION', newEd);
                                                 setActiveEditionIds(prev => [...prev, newEd.id]);
-                                                // Trigger autosave to capture the new edition ID in the order
                                                 triggerAutoSave(editingOrder, selectedLines);
                                             }} className="bg-indigo-600 text-white text-[10px] px-3 py-1 rounded font-bold shadow-sm hover:bg-indigo-700 transition-colors">CREA EDIZIONE</button>
                                         </div>
@@ -741,12 +759,4 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
       </div>
     </div>
   );
-
-  function calculateTotal(items: PurchaseLineItem[], type: 'planned' | 'actual') {
-    return items.reduce((acc, item) => {
-       const price = item.unitPriceOverride || 0;
-       const qty = type === 'planned' ? item.plannedQty : item.actualQty;
-       return acc + (qty * price);
-    }, 0);
-  }
 };
