@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppData, PurchaseOrder, PurchaseLineItem, WorkflowStatus, RiaStatus, CourseEdition, PurchaseEm } from '../types';
-import { Plus, Trash2, Edit, Save, Copy, Package, Calendar, Hash, X, Search, Filter, BookOpen, Layers, Users, ArrowUpDown, CheckSquare, Square, ClipboardCheck, Activity } from 'lucide-react';
+import { Plus, Trash2, Save, Package, Calendar, Hash, X, Search, BookOpen, Users, ArrowUpDown, CheckSquare, Square, ClipboardCheck, Activity, CloudCheck, CloudUpload, AlertCircle, Loader2 } from 'lucide-react';
 import { api } from '../services/apiService';
 
 interface PurchasingProps {
@@ -9,6 +9,8 @@ interface PurchasingProps {
   setData: React.Dispatch<React.SetStateAction<AppData>>;
   mode: 'workflow' | 'reconciliation';
 }
+
+type SaveStatus = 'saved' | 'saving' | 'error' | 'idle';
 
 export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) => {
   const [editingOrder, setEditingOrder] = useState<Partial<PurchaseOrder> | null>(null);
@@ -27,7 +29,69 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
   const [newEmCode, setNewEmCode] = useState('');
   const [newEmSelectedEditions, setNewEmSelectedEditions] = useState<string[]>([]);
 
-  const handleCreateOrder = () => {
+  // Auto-save state
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Helper to construct the full order object for saving
+  const getFullOrderForSave = useCallback((order: Partial<PurchaseOrder>, lines: PurchaseLineItem[]) => {
+    const itemsTotalPlanned = lines.reduce((acc, item) => acc + (item.plannedQty * (item.unitPriceOverride || 0)), 0);
+    const itemsTotalActual = lines.reduce((acc, item) => acc + (item.actualQty * (item.unitPriceOverride || 0)), 0);
+
+    const updatedItems = lines.map(line => ({
+      ...line,
+      plannedCost: line.plannedQty * line.unitPriceOverride,
+      actualCost: line.actualQty * line.unitPriceOverride
+    }));
+
+    const updatedEms = (order.ems || []).map(em => {
+        const calculatedAmount = updatedItems
+            .filter(l => em.editionIds.includes(l.editionId))
+            .reduce((acc, l) => acc + (l.actualQty * l.unitPriceOverride), 0);
+        return { ...em, amount: calculatedAmount };
+    });
+
+    let finalActualAmount = order.actualAmount || 0;
+    if (order.isGeneric && updatedEms.length > 0) {
+        finalActualAmount = updatedEms.reduce((acc, em) => acc + em.amount, 0);
+    }
+
+    return {
+      ...order,
+      ems: updatedEms,
+      items: updatedItems,
+      actualAmount: finalActualAmount,
+      plannedAmount: order.isGeneric ? (order.plannedAmount || 0) : itemsTotalPlanned
+    } as PurchaseOrder;
+  }, []);
+
+  // Debounced save function
+  const triggerAutoSave = useCallback((order: Partial<PurchaseOrder>, lines: PurchaseLineItem[]) => {
+    if (!order.id || !order.supplierId) return;
+
+    setSaveStatus('saving');
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        const fullOrder = getFullOrderForSave(order, lines);
+        
+        // Update local state first to keep UI snappy
+        setData(prev => ({
+          ...prev,
+          orders: prev.orders.map(o => o.id === fullOrder.id ? fullOrder : o)
+        }));
+
+        await api.mutate('UPSERT_ORDER', fullOrder);
+        setSaveStatus('saved');
+      } catch (error) {
+        console.error("Auto-save failed:", error);
+        setSaveStatus('error');
+      }
+    }, 1000); // 1 second debounce
+  }, [setData, getFullOrderForSave]);
+
+  const handleCreateOrder = async () => {
     const newOrder: PurchaseOrder = {
       id: crypto.randomUUID(),
       supplierId: '',
@@ -44,10 +108,14 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
       ems: [],
       items: []
     };
+    
+    // Non salviamo immediatamente nel DB perché manca il supplierId (vincolo del DB)
+    // Ma impostiamo lo stato editing
     setEditingOrder(newOrder);
     setSelectedLines([]);
     setActiveCourseIds([]);
     setActiveEditionIds([]);
+    setSaveStatus('idle');
   };
 
   const handleEditOrder = (order: PurchaseOrder) => {
@@ -62,55 +130,43 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
 
     setActiveEditionIds(editionIds);
     setActiveCourseIds(courseIds);
+    setSaveStatus('saved');
   };
 
   const handleSupplierChange = (supplierId: string) => {
     if (!editingOrder) return;
-    setEditingOrder(prev => prev ? { ...prev, supplierId } : null);
+    const updated = { ...editingOrder, supplierId };
+    setEditingOrder(updated);
     setSelectedLines([]);
     setActiveCourseIds([]);
     setActiveEditionIds([]);
+    
+    // Al cambio fornitore forziamo un salvataggio immediato se abbiamo il supplierId
+    if (supplierId) {
+        const full = getFullOrderForSave(updated, []);
+        setData(prev => ({...prev, orders: [...prev.orders, full]}));
+        api.mutate('UPSERT_ORDER', full);
+        setSaveStatus('saved');
+    }
   };
 
-  const calculateTotal = (items: PurchaseLineItem[], type: 'planned' | 'actual') => {
-    return items.reduce((acc, item) => {
-       const price = item.unitPriceOverride || 0;
-       const qty = type === 'planned' ? item.plannedQty : item.actualQty;
-       return acc + (qty * price);
-    }, 0);
+  // Funzione per aggiornare campi di testata con autosave
+  const updateOrderField = (field: keyof PurchaseOrder, value: any) => {
+    if (!editingOrder) return;
+    const updated = { ...editingOrder, [field]: value };
+    setEditingOrder(updated);
+    triggerAutoSave(updated, selectedLines);
   };
 
-  const handleSaveOrder = async () => {
+  const handleSaveOrderManual = async () => {
     if (!editingOrder || !editingOrder.id) return;
     if (!editingOrder.supplierId) {
       alert("Seleziona un fornitore prima di salvare.");
       return;
     }
-
-    const updatedItems = selectedLines.map(line => ({
-      ...line,
-      plannedCost: line.plannedQty * line.unitPriceOverride,
-      actualCost: line.actualQty * line.unitPriceOverride
-    }));
-
-    const updatedEms = (editingOrder.ems || []).map(em => {
-        const calculatedAmount = updatedItems
-            .filter(l => em.editionIds.includes(l.editionId))
-            .reduce((acc, l) => acc + (l.actualQty * l.unitPriceOverride), 0);
-        return { ...em, amount: calculatedAmount };
-    });
-
-    let finalActualAmount = editingOrder.actualAmount || 0;
-    if (editingOrder.isGeneric && updatedEms.length > 0) {
-        finalActualAmount = updatedEms.reduce((acc, em) => acc + em.amount, 0);
-    }
-
-    const finalOrder = {
-      ...editingOrder,
-      ems: updatedEms,
-      items: updatedItems,
-      actualAmount: finalActualAmount
-    } as PurchaseOrder;
+    
+    setSaveStatus('saving');
+    const finalOrder = getFullOrderForSave(editingOrder, selectedLines);
 
     setData(prev => {
       const exists = prev.orders.find(o => o.id === finalOrder.id);
@@ -118,6 +174,7 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
     });
 
     await api.mutate('UPSERT_ORDER', finalOrder);
+    setSaveStatus('saved');
     setEditingOrder(null);
   };
 
@@ -141,15 +198,21 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
       plannedCost: 0,
       actualCost: 0
     };
-    setSelectedLines([...selectedLines, newItem]);
+    const updatedLines = [...selectedLines, newItem];
+    setSelectedLines(updatedLines);
+    if (editingOrder) triggerAutoSave(editingOrder, updatedLines);
   };
 
   const updateLineItem = (id: string, field: keyof PurchaseLineItem, value: any) => {
-    setSelectedLines(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item));
+    const updatedLines = selectedLines.map(item => item.id === id ? { ...item, [field]: value } : item);
+    setSelectedLines(updatedLines);
+    if (editingOrder) triggerAutoSave(editingOrder, updatedLines);
   };
 
   const removeLineItem = (id: string) => {
-    setSelectedLines(prev => prev.filter(item => item.id !== id));
+    const updatedLines = selectedLines.filter(item => item.id !== id);
+    setSelectedLines(updatedLines);
+    if (editingOrder) triggerAutoSave(editingOrder, updatedLines);
   };
 
   const handleAddEm = () => {
@@ -173,24 +236,43 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
           editionIds: [...newEmSelectedEditions]
       };
 
-      setEditingOrder(prev => prev ? ({ ...prev, ems: [...(prev.ems || []), newEm] }) : null);
+      const updatedEms = [...(editingOrder?.ems || []), newEm];
+      const updatedOrder = editingOrder ? { ...editingOrder, ems: updatedEms } : null;
+      
+      if (updatedOrder) {
+          setEditingOrder(updatedOrder);
+          triggerAutoSave(updatedOrder, selectedLines);
+      }
+      
       setNewEmCode(''); 
       setNewEmSelectedEditions([]);
   };
 
-  const toggleEditionSelectionForEm = (editionId: string) => {
-      setNewEmSelectedEditions(prev => 
-        prev.includes(editionId) ? prev.filter(id => id !== editionId) : [...prev, editionId]
-      );
+  const removeEm = (emId: string) => {
+    if (!editingOrder) return;
+    const updatedEms = (editingOrder.ems || []).filter(e => e.id !== emId);
+    const updatedOrder = { ...editingOrder, ems: updatedEms };
+    setEditingOrder(updatedOrder);
+    triggerAutoSave(updatedOrder, selectedLines);
   };
 
+  // Fix: Adding missing function toggleEditionSelectionForEm
+  const toggleEditionSelectionForEm = (editionId: string) => {
+    setNewEmSelectedEditions(prev => 
+      prev.includes(editionId) 
+        ? prev.filter(id => id !== editionId) 
+        : [...prev, editionId]
+    );
+  };
+
+  // Fix: Adding missing function toggleSort
   const toggleSort = (field: 'createdAt' | 'title' | 'amount') => {
-      if (sortField === field) {
-          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-      } else {
-          setSortField(field);
-          setSortDirection('asc');
-      }
+    if (sortField === field) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
   };
 
   if (editingOrder) {
@@ -204,10 +286,41 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
     const genericServices = data.services.filter(s => s.supplierId === editingOrder.supplierId && !s.courseId);
 
     return (
-      <div className="bg-white p-6 rounded-lg shadow-lg animate-fade-in max-w-5xl mx-auto">
+      <div className="bg-white p-6 rounded-lg shadow-lg animate-fade-in max-w-5xl mx-auto border border-gray-100">
         <div className="flex justify-between items-start mb-6 border-b pb-4">
-           <div>
-             <h2 className="text-2xl font-bold text-gray-800">{editingOrder.id ? (mode === 'reconciliation' ? 'Consuntivazione' : 'Gestione Scheda') : 'Nuova Scheda'}</h2>
+           <div className="flex flex-col gap-1">
+             <div className="flex items-center gap-3">
+                <h2 className="text-2xl font-bold text-gray-800">
+                    {editingOrder.id ? (mode === 'reconciliation' ? 'Consuntivazione' : 'Gestione Scheda') : 'Nuova Scheda'}
+                </h2>
+                {/* Autosave Indicator */}
+                <div className="flex items-center gap-1.5 px-3 py-1 bg-gray-50 border rounded-full">
+                    {saveStatus === 'saving' && (
+                        <>
+                            <Loader2 size={12} className="animate-spin text-amber-500" />
+                            <span className="text-[10px] font-bold text-amber-600 uppercase tracking-tighter">Salvataggio...</span>
+                        </>
+                    )}
+                    {saveStatus === 'saved' && (
+                        <>
+                            <CloudCheck size={12} className="text-green-500" />
+                            <span className="text-[10px] font-bold text-green-600 uppercase tracking-tighter">Sincronizzato</span>
+                        </>
+                    )}
+                    {saveStatus === 'error' && (
+                        <>
+                            <AlertCircle size={12} className="text-red-500" />
+                            <span className="text-[10px] font-bold text-red-600 uppercase tracking-tighter">Errore salvataggio</span>
+                        </>
+                    )}
+                    {saveStatus === 'idle' && (
+                        <>
+                            <CloudUpload size={12} className="text-gray-400" />
+                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">In attesa</span>
+                        </>
+                    )}
+                </div>
+             </div>
              <div className="flex gap-2 mt-1">
                 {editingOrder.isGeneric && <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider">Acquisto Generico</span>}
                 <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${editingOrder.status === WorkflowStatus.CLOSED ? 'bg-gray-200 text-gray-700' : 'bg-blue-100 text-blue-700'}`}>
@@ -225,21 +338,22 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8 bg-gray-50 p-4 rounded-lg border">
           <div className="md:col-span-2">
               <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Titolo Scheda</label>
-              <input type="text" className="w-full border rounded p-2 text-sm shadow-sm focus:ring-2 focus:ring-blue-500 outline-none" value={editingOrder.title} onChange={e => setEditingOrder({...editingOrder, title: e.target.value})}/>
+              <input type="text" className="w-full border rounded p-2 text-sm shadow-sm focus:ring-2 focus:ring-blue-500 outline-none" value={editingOrder.title} onChange={e => updateOrderField('title', e.target.value)}/>
           </div>
           <div>
               <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Fornitore</label>
-              <select className="w-full border rounded p-2 text-sm disabled:bg-gray-100" value={editingOrder.supplierId} onChange={e => handleSupplierChange(e.target.value)} disabled={mode === 'reconciliation'}>
+              <select className="w-full border rounded p-2 text-sm disabled:bg-gray-200" value={editingOrder.supplierId} onChange={e => handleSupplierChange(e.target.value)} disabled={mode === 'reconciliation' || (!!editingOrder.id && !!editingOrder.supplierId)}>
                 <option value="">-- Seleziona Fornitore --</option>
                 {data.suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
+              {editingOrder.supplierId && mode !== 'reconciliation' && <p className="text-[9px] text-gray-400 mt-1 italic">* Fornitore bloccato dopo la selezione per coerenza dati.</p>}
           </div>
           <div>
               <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Stato Workflow</label>
               <select 
                 className={`w-full border rounded p-2 text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none ${editingOrder.status === WorkflowStatus.CLOSED ? 'bg-gray-200' : 'bg-blue-50 text-blue-800'}`}
                 value={editingOrder.status} 
-                onChange={e => setEditingOrder({...editingOrder, status: e.target.value as WorkflowStatus})}
+                onChange={e => updateOrderField('status', e.target.value as WorkflowStatus)}
               >
                 {Object.values(WorkflowStatus).map(status => <option key={status} value={status}>{status}</option>)}
               </select>
@@ -247,26 +361,31 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
 
           <div className="md:col-span-1">
               <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Codice RDA</label>
-              <input type="text" className="w-full border rounded p-2 text-sm" value={editingOrder.rdaCode || ''} onChange={e => setEditingOrder({...editingOrder, rdaCode: e.target.value})} placeholder="Es. RDA-1234"/>
+              <input type="text" className="w-full border rounded p-2 text-sm" value={editingOrder.rdaCode || ''} onChange={e => updateOrderField('rdaCode', e.target.value)} placeholder="Es. RDA-1234"/>
           </div>
           <div>
               <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Stato RIA</label>
-              <select className="w-full border rounded p-2 text-sm" value={editingOrder.riaStatus} onChange={e => setEditingOrder({...editingOrder, riaStatus: e.target.value as RiaStatus})}>
+              <select className="w-full border rounded p-2 text-sm" value={editingOrder.riaStatus} onChange={e => updateOrderField('riaStatus', e.target.value as RiaStatus)}>
                 {Object.values(RiaStatus).map(status => <option key={status} value={status}>{status || 'Nessuno'}</option>)}
               </select>
           </div>
           <div>
               <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Codice RIA</label>
-              <input type="text" className="w-full border rounded p-2 text-sm" value={editingOrder.riaCode || ''} onChange={e => setEditingOrder({...editingOrder, riaCode: e.target.value})} placeholder="Es. RIA-5678"/>
+              <input type="text" className="w-full border rounded p-2 text-sm" value={editingOrder.riaCode || ''} onChange={e => updateOrderField('riaCode', e.target.value)} placeholder="Es. RIA-5678"/>
           </div>
           <div>
               <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Codice ODA (SAP)</label>
-              <input type="text" className="w-full border rounded p-2 text-sm font-mono" value={editingOrder.odaCode || ''} onChange={e => setEditingOrder({...editingOrder, odaCode: e.target.value})} placeholder="45000..."/>
+              <input type="text" className="w-full border rounded p-2 text-sm font-mono" value={editingOrder.odaCode || ''} onChange={e => updateOrderField('odaCode', e.target.value)} placeholder="45000..."/>
           </div>
           
           <div className="col-span-1 md:col-span-4 flex flex-col gap-4 bg-white p-4 rounded border shadow-sm">
              <div className="flex items-center gap-2">
-                 <button onClick={() => mode === 'workflow' && setEditingOrder({...editingOrder, isGeneric: !editingOrder.isGeneric})}
+                 <button onClick={() => {
+                     if (mode === 'workflow') {
+                        const newVal = !editingOrder.isGeneric;
+                        updateOrderField('isGeneric', newVal);
+                     }
+                 }}
                     className={`w-10 h-5 rounded-full relative transition-colors ${editingOrder.isGeneric ? 'bg-amber-500' : 'bg-gray-300'} ${mode === 'reconciliation' ? 'cursor-not-allowed opacity-50' : ''}`}>
                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${editingOrder.isGeneric ? 'left-6' : 'left-1'}`}></div>
                  </button>
@@ -277,13 +396,13 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                     <div>
                         <label className="block text-[10px] font-bold text-amber-700 uppercase">Budget Forfettario Pianificato (€)</label>
                         <input type="number" className="w-full border p-2 rounded text-sm bg-amber-50 font-bold" value={editingOrder.plannedAmount || 0} 
-                            onChange={e => setEditingOrder({...editingOrder, plannedAmount: Number(e.target.value)})} disabled={mode === 'reconciliation'}/>
+                            onChange={e => updateOrderField('plannedAmount', Number(e.target.value))} disabled={mode === 'reconciliation'}/>
                     </div>
                     {mode === 'reconciliation' && (
                         <div>
                             <label className="block text-[10px] font-bold text-green-700 uppercase">Importo Forfettario Consuntivato (€)</label>
                             <input type="number" className="w-full border p-2 rounded text-sm bg-green-50 font-bold" value={editingOrder.actualAmount || 0} 
-                                onChange={e => setEditingOrder({...editingOrder, actualAmount: Number(e.target.value)})}/>
+                                onChange={e => updateOrderField('actualAmount', Number(e.target.value))}/>
                         </div>
                     )}
                  </div>
@@ -291,7 +410,7 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
           </div>
         </div>
 
-        {editingOrder.supplierId && (
+        {editingOrder.supplierId ? (
             <div className="space-y-8">
                 {/* Sezione EM */}
                 {mode === 'reconciliation' && (
@@ -309,7 +428,7 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                                             </div>
                                             <div className="text-[10px] text-gray-400 font-bold uppercase">Edizioni: {coveredEditions || 'Nessuna'}</div>
                                         </div>
-                                        <button onClick={() => setEditingOrder({...editingOrder, ems: (editingOrder.ems || []).filter(e => e.id !== em.id)})} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
+                                        <button onClick={() => removeEm(em.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
                                     </div>
                                 );
                             })}
@@ -352,9 +471,15 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                                     <h4 className="font-bold text-lg text-gray-800">{course?.title}</h4>
                                     {allowManagement && (
                                         <button onClick={() => {
-                                            setActiveCourseIds(prev => prev.filter(id => id !== courseId));
-                                            setActiveEditionIds(prev => prev.filter(eid => data.editions.find(e => e.id === eid)?.courseId !== courseId));
-                                            setSelectedLines(prev => prev.filter(l => !editions.includes(l.editionId)));
+                                            const updatedCourseIds = activeCourseIds.filter(id => id !== courseId);
+                                            const editionsToRemove = activeEditionIds.filter(eid => data.editions.find(e => e.id === eid)?.courseId === courseId);
+                                            const updatedEditionIds = activeEditionIds.filter(eid => !editionsToRemove.includes(eid));
+                                            const updatedLines = selectedLines.filter(l => !editionsToRemove.includes(l.editionId));
+                                            
+                                            setActiveCourseIds(updatedCourseIds);
+                                            setActiveEditionIds(updatedEditionIds);
+                                            setSelectedLines(updatedLines);
+                                            triggerAutoSave(editingOrder, updatedLines);
                                         }} className="text-red-400 hover:text-red-600"><Trash2 size={18} /></button>
                                     )}
                                 </div>
@@ -384,8 +509,11 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                                                     </div>
                                                     {allowManagement && (
                                                         <button onClick={() => {
-                                                            setActiveEditionIds(prev => prev.filter(id => id !== editionId));
-                                                            setSelectedLines(prev => prev.filter(l => l.editionId !== editionId));
+                                                            const updatedEditionIds = activeEditionIds.filter(id => id !== editionId);
+                                                            const updatedLines = selectedLines.filter(l => l.editionId !== editionId);
+                                                            setActiveEditionIds(updatedEditionIds);
+                                                            setSelectedLines(updatedLines);
+                                                            triggerAutoSave(editingOrder, updatedLines);
                                                         }} className="text-red-300 hover:text-red-500"><X size={20}/></button>
                                                     )}
                                                 </div>
@@ -409,8 +537,13 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                                                                         {allowManagement ? (
                                                                             <select className="w-full border rounded text-xs p-1" value={line.serviceItemId} onChange={e => {
                                                                                 const s = data.services.find(si => si.id === e.target.value);
-                                                                                updateLineItem(line.id, 'serviceItemId', e.target.value);
-                                                                                updateLineItem(line.id, 'unitPriceOverride', s?.unitPrice || 0);
+                                                                                const updatedLines = selectedLines.map(item => item.id === line.id ? { 
+                                                                                    ...item, 
+                                                                                    serviceItemId: e.target.value,
+                                                                                    unitPriceOverride: s?.unitPrice || 0
+                                                                                } : item);
+                                                                                setSelectedLines(updatedLines);
+                                                                                triggerAutoSave(editingOrder, updatedLines);
                                                                             }}>
                                                                                 <option value="">-- Seleziona --</option>
                                                                                 {[...genericServices, ...data.services.filter(s => s.courseId === courseId)].map(s => (
@@ -441,6 +574,8 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                                                 setData(prev => ({...prev, editions: [...prev.editions, newEd]}));
                                                 await api.mutate('UPSERT_EDITION', newEd);
                                                 setActiveEditionIds(prev => [...prev, newEd.id]);
+                                                // Trigger autosave to capture the new edition ID in the order
+                                                triggerAutoSave(editingOrder, selectedLines);
                                             }} className="bg-indigo-600 text-white text-[10px] px-3 py-1 rounded font-bold shadow-sm hover:bg-indigo-700 transition-colors">CREA EDIZIONE</button>
                                         </div>
                                     )}
@@ -459,15 +594,41 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
                                 {data.courses.filter(c => c.supplierId === editingOrder.supplierId && !activeCourseIds.includes(c.id)).map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                             </select>
                         </div>
-                        <button onClick={() => { if(courseToAdd) setActiveCourseIds([...activeCourseIds, courseToAdd]); setCourseToAdd(''); }} disabled={!courseToAdd} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold shadow-md hover:bg-blue-700 transition-colors h-[42px] mt-5">Associa Corso</button>
+                        <button 
+                            onClick={() => { 
+                                if(courseToAdd) {
+                                    const updatedCourseIds = [...activeCourseIds, courseToAdd];
+                                    setActiveCourseIds(updatedCourseIds);
+                                    setCourseToAdd(''); 
+                                }
+                            }} 
+                            disabled={!courseToAdd} 
+                            className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold shadow-md hover:bg-blue-700 transition-colors h-[42px] mt-5 disabled:opacity-50"
+                        >
+                            Associa Corso
+                        </button>
                     </div>
                 )}
+            </div>
+        ) : (
+            <div className="py-20 text-center bg-gray-50 rounded-xl border-2 border-dashed flex flex-col items-center gap-3">
+                <Users size={48} className="text-gray-300" />
+                <p className="text-gray-500 font-medium">Seleziona un fornitore per iniziare a comporre la scheda.</p>
             </div>
         )}
 
         <div className="flex justify-end gap-3 mt-10 pt-6 border-t">
-          <button onClick={() => setEditingOrder(null)} className="px-8 py-2 border rounded-lg font-bold hover:bg-gray-50 transition-colors">Annulla</button>
-          <button onClick={handleSaveOrder} className="px-8 py-2 bg-blue-600 text-white rounded-lg font-bold shadow-lg flex items-center gap-2 hover:bg-blue-700 transition-all"><Save size={18} /> Salva Scheda</button>
+          <button onClick={() => {
+              if (saveStatus === 'saving') {
+                  if (!window.confirm("C'è un salvataggio in corso. Sei sicuro di voler chiudere?")) return;
+              }
+              setEditingOrder(null);
+          }} className="px-8 py-2 border rounded-lg font-bold hover:bg-gray-50 transition-colors">Chiudi</button>
+          
+          <button onClick={handleSaveOrderManual} className="px-8 py-2 bg-blue-600 text-white rounded-lg font-bold shadow-lg flex items-center gap-2 hover:bg-blue-700 transition-all">
+            {saveStatus === 'saving' ? <Loader2 size={18} className="animate-spin"/> : <Save size={18} />} 
+            Finalizza e Esci
+          </button>
         </div>
       </div>
     );
@@ -498,18 +659,18 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
         <div className="flex flex-wrap gap-3 items-center">
             <div className="relative">
                 <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
-                <input className="pl-10 pr-4 py-2 border rounded-lg w-64 text-sm shadow-sm" placeholder="Cerca ordine..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
+                <input className="pl-10 pr-4 py-2 border rounded-lg w-64 text-sm shadow-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Cerca ordine..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
             </div>
             
             <div className="relative">
                 <Users className="absolute left-3 top-2.5 text-gray-400" size={18} />
-                <select className="pl-10 pr-4 py-2 border rounded-lg text-sm bg-white font-medium min-w-[200px] shadow-sm" value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)}>
+                <select className="pl-10 pr-4 py-2 border rounded-lg text-sm bg-white font-medium min-w-[200px] shadow-sm focus:ring-2 focus:ring-blue-500 outline-none" value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)}>
                     <option value="">Tutti i Fornitori</option>
                     {data.suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
             </div>
 
-            <select className="border rounded-lg px-3 py-2 text-sm bg-white font-medium shadow-sm" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+            <select className="border rounded-lg px-3 py-2 text-sm bg-white font-medium shadow-sm focus:ring-2 focus:ring-blue-500 outline-none" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
                 <option value="ACTIVE">Schede Attive</option>
                 <option value="ALL">Tutte le schede</option>
                 <option value={WorkflowStatus.CLOSED}>Solo Chiuse</option>
@@ -580,4 +741,12 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
       </div>
     </div>
   );
+
+  function calculateTotal(items: PurchaseLineItem[], type: 'planned' | 'actual') {
+    return items.reduce((acc, item) => {
+       const price = item.unitPriceOverride || 0;
+       const qty = type === 'planned' ? item.plannedQty : item.actualQty;
+       return acc + (qty * price);
+    }, 0);
+  }
 };
