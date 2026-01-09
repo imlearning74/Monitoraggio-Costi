@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { AppData, Supplier, PurchaseOrder } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { analyzeProcurementData } from '../services/geminiService';
-import { Bot, RefreshCcw, Loader2, Filter, Calendar, ShieldCheck, Lock, Info } from 'lucide-react';
+import { Bot, RefreshCcw, Loader2, Filter, Calendar, ShieldCheck, Lock, Info, ListOrdered, GraduationCap, ChevronRight } from 'lucide-react';
 
 interface DashboardProps {
   data: AppData;
@@ -47,6 +47,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       Residuo: s.contractValue - actual
     };
   });
+
+  // Filtro per la tabella analitica ordini
+  const filteredOrders = data.orders.filter(o => {
+    const matchesSupplier = !selectedSupplierId || o.supplierId === selectedSupplierId;
+    const matchesDate = !startDate || !endDate || (o.createdAt >= startDate && o.createdAt <= endDate);
+    return matchesSupplier && matchesDate;
+  });
+
+  const getCoursesForOrder = (order: PurchaseOrder) => {
+    const editionIds = [...new Set(order.items.map(i => i.editionId))];
+    const courseIds = [...new Set(editionIds.map(eid => data.editions.find(e => e.id === eid)?.courseId).filter(Boolean))];
+    return courseIds.map(cid => data.courses.find(c => c.id === cid)?.title).filter(Boolean);
+  };
 
   const totalBudget = supplierStats.reduce((a,b) => a + b.Budget, 0);
   const totalPlanned = supplierStats.reduce((a,b) => a + b.Pianificato, 0);
@@ -215,7 +228,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
                 label={({name, percent}) => `${(percent * 100).toFixed(0)}%`}
               >
                 <Cell fill="#10b981" />
-                <Cell fill="#f1f5f9" />
+                <Cell fill="#f59e0b" /> {/* Cambiato da grigio f1f5f9 a giallo f59e0b */}
                 <Cell fill="#3b82f6" />
               </Pie>
               <Tooltip formatter={(value) => `€ ${Number(value).toLocaleString()}`} contentStyle={{borderRadius: '12px'}} />
@@ -223,6 +236,75 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
             </PieChart>
           </ResponsiveContainer>
         </div>
+      </div>
+
+      {/* Nuova Tabella Riepilogo Analitico */}
+      <div className="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
+          <div className="p-5 border-b flex justify-between items-center bg-gray-50/50">
+              <h3 className="font-bold text-gray-700 flex items-center gap-2">
+                  <ListOrdered size={18} className="text-indigo-500"/> Riepilogo Analitico Ordini & Corsi
+              </h3>
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-white border px-2 py-1 rounded">
+                  {filteredOrders.length} Schede trovate
+              </span>
+          </div>
+          <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                  <thead className="text-[10px] font-bold text-gray-400 uppercase bg-white border-b">
+                      <tr>
+                          <th className="px-6 py-3">Fornitore</th>
+                          <th className="px-6 py-3">Scheda / Ordine</th>
+                          <th className="px-6 py-3">Corsi Associati</th>
+                          <th className="px-6 py-3 text-right">Budget Pianificato</th>
+                          <th className="px-6 py-3 text-right">Importo Consuntivato</th>
+                          <th className="px-6 py-3 text-center">Status</th>
+                      </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                      {filteredOrders.map(order => {
+                          const supplier = data.suppliers.find(s => s.id === order.supplierId);
+                          const courses = getCoursesForOrder(order);
+                          const totalPlan = order.isGeneric ? Math.max(order.plannedAmount || 0, order.items.reduce((s,i) => s+i.plannedCost, 0)) : order.items.reduce((s,i) => s+i.plannedCost, 0);
+                          const totalAct = order.isGeneric ? (order.items.reduce((s,i) => s+i.actualCost, 0) > 0 ? order.items.reduce((s,i) => s+i.actualCost, 0) : order.actualAmount) : order.items.reduce((s,i) => s+i.actualCost, 0);
+
+                          return (
+                              <tr key={order.id} className="hover:bg-gray-50 transition-colors">
+                                  <td className="px-6 py-4 font-semibold text-gray-600">{supplier?.name || 'N/A'}</td>
+                                  <td className="px-6 py-4">
+                                      <div className="flex flex-col">
+                                          <span className="font-bold text-gray-800">{order.title}</span>
+                                          <span className="text-[10px] text-gray-400 font-mono">{new Date(order.createdAt).toLocaleDateString()}</span>
+                                      </div>
+                                  </td>
+                                  <td className="px-6 py-4">
+                                      <div className="flex flex-wrap gap-1">
+                                          {courses.length > 0 ? courses.map((c, idx) => (
+                                              <span key={idx} className="inline-flex items-center gap-1 text-[9px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-100 font-bold whitespace-nowrap">
+                                                  <GraduationCap size={10}/> {c}
+                                              </span>
+                                          )) : <span className="text-gray-300 italic text-[10px]">Nessun corso</span>}
+                                      </div>
+                                  </td>
+                                  <td className="px-6 py-4 text-right font-mono font-bold text-gray-600">€ {totalPlan.toLocaleString()}</td>
+                                  <td className="px-6 py-4 text-right font-mono font-bold text-green-600">€ {totalAct.toLocaleString()}</td>
+                                  <td className="px-6 py-4 text-center">
+                                      <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full ${order.status === 'Chiuso/EM' ? 'bg-gray-100 text-gray-500' : 'bg-blue-100 text-blue-700'}`}>
+                                          {order.status}
+                                      </span>
+                                  </td>
+                              </tr>
+                          );
+                      })}
+                      {filteredOrders.length === 0 && (
+                          <tr>
+                              <td colSpan={6} className="px-6 py-20 text-center text-gray-400 italic">
+                                  Nessun ordine trovato per i criteri selezionati.
+                              </td>
+                          </tr>
+                      )}
+                  </tbody>
+              </table>
+          </div>
       </div>
     </div>
   );
