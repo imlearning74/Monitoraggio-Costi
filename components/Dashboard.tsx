@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { AppData, PurchaseOrder } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { analyzeProcurementData } from '../services/geminiService';
-import { Bot, RefreshCcw, Loader2, Filter, Calendar, ShieldCheck, Lock, Info, Key, AlertTriangle } from 'lucide-react';
+import { Bot, RefreshCcw, Loader2, Filter, Calendar, ShieldCheck, Lock, Info, Key, AlertTriangle, List, TrendingUp } from 'lucide-react';
 
 interface DashboardProps {
   data: AppData;
@@ -14,9 +14,6 @@ const STATUS_COLORS = {
   planned: '#3b82f6',   
   budget: '#f59e0b'     
 };
-
-// Removed the manual global declaration of window.aistudio because it conflicts with 
-// the existing AIStudio type provided by the environment.
 
 export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   const [aiAnalysis, setAiAnalysis] = useState<string>("");
@@ -44,28 +41,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     if (window.aistudio) {
       // @ts-ignore
       await window.aistudio.openSelectKey();
-      // Assumiamo successo dopo l'apertura come da linee guida per evitare race conditions
       setHasKey(true);
-      setAiAnalysis(""); // Resetta errori precedenti
+      setAiAnalysis(""); 
     }
   };
 
   const filteredSuppliers = data.suppliers.filter(s => {
     if (selectedSupplierId && s.id !== selectedSupplierId) return false;
+    // Se ci sono filtri data, potremmo voler filtrare i fornitori per data contratto, 
+    // ma solitamente i KPI della dashboard filtrano gli ORDINI per data.
     return true;
   });
 
   const supplierStats = filteredSuppliers.map(s => {
-    const orders = data.orders.filter(o => o.supplierId === s.id);
+    const orders = data.orders.filter(o => {
+        const matchesSupplier = o.supplierId === s.id;
+        const matchesDate = (!startDate || o.createdAt >= startDate) && (!endDate || o.createdAt <= endDate);
+        return matchesSupplier && matchesDate;
+    });
+    
     const planned = orders.reduce((acc, o) => acc + o.items.reduce((sum, i) => sum + i.plannedCost, 0), 0);
     const actual = orders.reduce((acc, o) => acc + o.items.reduce((sum, i) => sum + i.actualCost, 0), 0);
+    const impegnatoNetto = Math.max(0, planned - actual);
     const residuo = Math.max(0, s.contractValue - Math.max(planned, actual));
+    const consumoPercent = s.contractValue > 0 ? (Math.max(planned, actual) / s.contractValue) * 100 : 0;
 
     return {
+      id: s.id,
       name: s.name,
+      contractValue: s.contractValue,
       "Consuntivato": actual,
-      "Impegnato": Math.max(0, planned - actual),
-      "Budget": residuo
+      "Impegnato": impegnatoNetto,
+      "Budget": residuo,
+      consumoPercent
     };
   });
 
@@ -90,14 +98,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     }
   };
 
+  // KPI Globali basati sui filtri
   const totalBudget = filteredSuppliers.reduce((a, b) => a + b.contractValue, 0);
-  const currentOrders = data.orders.filter(o => !selectedSupplierId || o.supplierId === selectedSupplierId);
-  const totalPlanned = currentOrders.reduce((acc, o) => acc + o.items.reduce((sum, i) => sum + i.plannedCost, 0), 0);
-  const totalActual = currentOrders.reduce((acc, o) => acc + o.items.reduce((sum, i) => sum + i.actualCost, 0), 0);
-  const totalResidual = Math.max(0, totalBudget - Math.max(totalPlanned, totalActual));
+  const totalPlanned = supplierStats.reduce((acc, s) => acc + s.Impegnato + s.Consuntivato, 0);
+  const totalActual = supplierStats.reduce((acc, s) => acc + s.Consuntivato, 0);
+  const totalResidual = supplierStats.reduce((acc, s) => acc + s.Budget, 0);
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in pb-12">
       {/* Header & Controls */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
@@ -141,11 +149,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
                 </select>
              </div>
              <div className="flex flex-col">
-                 <label className="text-[10px] font-bold text-gray-400 uppercase mb-1">Da data</label>
+                 <label className="text-[10px] font-bold text-gray-400 uppercase mb-1">Periodo Ordini Da</label>
                  <input type="date" className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-sm" value={startDate} onChange={e => setStartDate(e.target.value)}/>
              </div>
              <div className="flex flex-col">
-                 <label className="text-[10px] font-bold text-gray-400 uppercase mb-1">A data</label>
+                 <label className="text-[10px] font-bold text-gray-400 uppercase mb-1">Periodo Ordini A</label>
                  <input type="date" className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-sm" value={endDate} onChange={e => setEndDate(e.target.value)}/>
              </div>
          </div>
@@ -164,9 +172,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
                 <button onClick={handleOpenKeySelector} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-xs hover:bg-red-700 shadow-md">
                   Seleziona nuova chiave API
                 </button>
-                <p className="mt-2 text-[10px] text-red-600">
-                  Nota: Assicurati di selezionare una API key da un progetto GCP con fatturazione attiva (paid project) e consulta la documentazione billing di Gemini API.
-                </p>
               </div>
             )}
           </div>
@@ -177,8 +182,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {[
           { label: 'Budget Contrattuale', val: totalBudget, color: 'text-gray-800' },
-          { label: 'Impegnato', val: totalPlanned, color: 'text-blue-600' },
-          { label: 'Consuntivato', val: totalActual, color: 'text-green-600' },
+          { label: 'Impegnato Totale', val: totalPlanned, color: 'text-blue-600' },
+          { label: 'Consuntivato Totale', val: totalActual, color: 'text-green-600' },
           { label: 'Budget (Residuo)', val: totalResidual, color: totalResidual < 0 ? 'text-red-600' : 'text-amber-600' },
         ].map((card, idx) => (
           <div key={idx} className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
@@ -192,7 +197,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-md h-96 border border-gray-100">
           <h3 className="text-lg font-bold mb-4 text-gray-700 flex items-center gap-2">
-              <RefreshCcw size={18} className="text-blue-500"/> Analisi Fornitori (€)
+              <TrendingUp size={18} className="text-blue-500"/> Analisi Fornitori (€)
           </h3>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={supplierStats} layout="vertical" margin={{ left: 20, right: 20 }}>
@@ -238,6 +243,75 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
               <Legend verticalAlign="bottom" height={36}/>
             </PieChart>
           </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Data Table Section */}
+      <div className="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
+        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+            <h3 className="text-lg font-bold text-gray-700 flex items-center gap-2">
+                <List size={18} className="text-primary"/> Dettaglio Analitico Fornitori
+            </h3>
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Dati aggiornati in tempo reale</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-wider">Fornitore</th>
+                <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-wider">Budget Contrattuale</th>
+                <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-wider text-blue-600">Impegnato</th>
+                <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-wider text-green-600">Consuntivato</th>
+                <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-wider text-amber-600">Residuo Libero</th>
+                <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-wider w-32">Utilizzo %</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {supplierStats.map((s) => (
+                <tr key={s.id} className="hover:bg-gray-50/80 transition-colors">
+                  <td className="px-6 py-4">
+                    <span className="font-bold text-gray-800">{s.name}</span>
+                  </td>
+                  <td className="px-6 py-4 font-mono text-xs text-gray-600">€ {s.contractValue.toLocaleString()}</td>
+                  <td className="px-6 py-4 font-mono text-xs font-bold text-blue-600">€ {s.Impegnato.toLocaleString()}</td>
+                  <td className="px-6 py-4 font-mono text-xs font-bold text-green-600">€ {s.Consuntivato.toLocaleString()}</td>
+                  <td className="px-6 py-4">
+                    <span className={`font-mono text-xs font-bold ${s.Budget <= 1000 ? 'text-red-600 bg-red-50' : 'text-amber-600 bg-amber-50'} px-2 py-1 rounded`}>
+                        € {s.Budget.toLocaleString()}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex flex-col gap-1">
+                        <div className="flex justify-between text-[10px] font-bold text-gray-400">
+                            <span>{s.consumoPercent.toFixed(1)}%</span>
+                        </div>
+                        <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
+                            <div 
+                                className={`h-full transition-all duration-500 ${s.consumoPercent > 90 ? 'bg-red-500' : s.consumoPercent > 70 ? 'bg-amber-500' : 'bg-green-500'}`}
+                                style={{ width: `${Math.min(100, s.consumoPercent)}%` }}
+                            ></div>
+                        </div>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {supplierStats.length === 0 && (
+                <tr>
+                    <td colSpan={6} className="px-6 py-20 text-center text-gray-400 italic">Nessun dato corrispondente ai filtri.</td>
+                </tr>
+              )}
+            </tbody>
+            <tfoot className="bg-gray-50/50 font-bold border-t-2 border-gray-100">
+                <tr>
+                    <td className="px-6 py-4 text-gray-800">TOTALE COMPLESSIVO</td>
+                    <td className="px-6 py-4 font-mono text-sm">€ {totalBudget.toLocaleString()}</td>
+                    <td className="px-6 py-4 font-mono text-sm text-blue-600">€ {supplierStats.reduce((a,b) => a + b.Impegnato, 0).toLocaleString()}</td>
+                    <td className="px-6 py-4 font-mono text-sm text-green-600">€ {totalActual.toLocaleString()}</td>
+                    <td className="px-6 py-4 font-mono text-sm text-amber-600">€ {totalResidual.toLocaleString()}</td>
+                    <td className="px-6 py-4"></td>
+                </tr>
+            </tfoot>
+          </table>
         </div>
       </div>
     </div>
