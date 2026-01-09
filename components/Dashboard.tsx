@@ -9,7 +9,12 @@ interface DashboardProps {
   data: AppData;
 }
 
-const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
+// Colori standardizzati per tutta la dashboard
+const STATUS_COLORS = {
+  actual: '#10b981',   // Verde: Consuntivato
+  planned: '#3b82f6',  // Blu: Impegnato non speso
+  available: '#f59e0b' // Giallo: Residuo Libero
+};
 
 export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   const [aiAnalysis, setAiAnalysis] = useState<string>("");
@@ -38,13 +43,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     const planned = orders.reduce((acc, o) => acc + o.items.reduce((sum, i) => sum + i.plannedCost, 0), 0);
     const actual = orders.reduce((acc, o) => acc + o.items.reduce((sum, i) => sum + i.actualCost, 0), 0);
     
+    // Logica di calcolo per stacking coerente
+    const impegnatoResiduo = Math.max(0, planned - actual);
+    const residuoLibero = Math.max(0, s.contractValue - Math.max(planned, actual));
+
     return {
       name: s.name,
       contractNum: s.contractNumber,
-      Budget: s.contractValue,
-      Pianificato: planned,
       Consuntivato: actual,
-      Residuo: s.contractValue - actual
+      "Impegnato Residuo": impegnatoResiduo,
+      "Disponibile": residuoLibero,
+      BudgetTotale: s.contractValue
     };
   });
 
@@ -61,10 +70,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     return courseIds.map(cid => data.courses.find(c => c.id === cid)?.title).filter(Boolean);
   };
 
-  const totalBudget = supplierStats.reduce((a,b) => a + b.Budget, 0);
-  const totalPlanned = supplierStats.reduce((a,b) => a + b.Pianificato, 0);
-  const totalActual = supplierStats.reduce((a,b) => a + b.Consuntivato, 0);
-  const totalResidual = supplierStats.reduce((a,b) => a + b.Residuo, 0);
+  const totalBudget = filteredSuppliers.reduce((a, b) => a + b.contractValue, 0);
+  const totalPlanned = data.orders.filter(o => !selectedSupplierId || o.supplierId === selectedSupplierId).reduce((acc, o) => acc + o.items.reduce((sum, i) => sum + i.plannedCost, 0), 0);
+  const totalActual = data.orders.filter(o => !selectedSupplierId || o.supplierId === selectedSupplierId).reduce((acc, o) => acc + o.items.reduce((sum, i) => sum + i.actualCost, 0), 0);
+  const totalResidual = Math.max(0, totalBudget - Math.max(totalPlanned, totalActual));
 
   const handleAiAnalysis = async () => {
     setLoadingAi(true);
@@ -168,23 +177,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
           <p className="text-2xl font-bold text-gray-800">€ {totalBudget.toLocaleString()}</p>
         </div>
         <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
-          <p className="text-blue-400 text-[10px] font-bold uppercase tracking-widest mb-1">Impegnato</p>
+          <p className="text-blue-400 text-[10px] font-bold uppercase tracking-widest mb-1">Pianificato</p>
           <p className="text-2xl font-bold text-blue-600">€ {totalPlanned.toLocaleString()}</p>
         </div>
         <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
-          <p className="text-green-400 text-[10px] font-bold uppercase tracking-widest mb-1">Speso</p>
+          <p className="text-green-400 text-[10px] font-bold uppercase tracking-widest mb-1">Speso (Consuntivato)</p>
           <p className="text-2xl font-bold text-green-600">€ {totalActual.toLocaleString()}</p>
         </div>
          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
-          <p className="text-indigo-400 text-[10px] font-bold uppercase tracking-widest mb-1">Residuo</p>
-          <p className={`text-2xl font-bold ${totalResidual < 0 ? 'text-red-600' : 'text-indigo-600'}`}>€ {totalResidual.toLocaleString()}</p>
+          <p className="text-amber-400 text-[10px] font-bold uppercase tracking-widest mb-1">Disponibile (Residuo)</p>
+          <p className={`text-2xl font-bold ${totalResidual < 0 ? 'text-red-600' : 'text-amber-600'}`}>€ {totalResidual.toLocaleString()}</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-md h-96 border border-gray-100">
           <h3 className="text-lg font-bold mb-4 text-gray-700 flex items-center gap-2">
-              <RefreshCcw size={18} className="text-blue-500"/> Dettaglio per Fornitore
+              <RefreshCcw size={18} className="text-blue-500"/> Composizione Budget per Fornitore
           </h3>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={supplierStats} layout="vertical" margin={{ left: 20, right: 20 }}>
@@ -201,22 +210,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
                 contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
               />
               <Legend />
-              <Bar dataKey="Budget" fill="#e2e8f0" stackId="a" radius={[0, 4, 4, 0]} />
-              <Bar dataKey="Pianificato" fill="#3b82f6" radius={[0, 4, 4, 0]} />
-              <Bar dataKey="Consuntivato" fill="#10b981" radius={[0, 4, 4, 0]} />
+              {/* Istogramma a barre impilate per allineamento coerenza */}
+              <Bar dataKey="Consuntivato" fill={STATUS_COLORS.actual} stackId="budget" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="Impegnato Residuo" fill={STATUS_COLORS.planned} stackId="budget" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="Disponibile" fill={STATUS_COLORS.available} stackId="budget" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
 
         <div className="bg-white p-6 rounded-xl shadow-md h-96 border border-gray-100">
-          <h3 className="text-lg font-bold mb-4 text-gray-700">Allocazione Budget {selectedSupplierId ? '(Fornitore)' : '(Globale)'}</h3>
+          <h3 className="text-lg font-bold mb-4 text-gray-700">Ripartizione Budget {selectedSupplierId ? '(Selezionato)' : '(Totale)'}</h3>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
                 data={[
                   { name: 'Consuntivato', value: totalActual },
-                  { name: 'Residuo Libero', value: Math.max(0, totalResidual) },
-                  { name: 'Impegnato (Non Consunt.)', value: Math.max(0, totalPlanned - totalActual) }
+                  { name: 'Impegnato (Non Speso)', value: Math.max(0, totalPlanned - totalActual) },
+                  { name: 'Disponibile', value: Math.max(0, totalBudget - Math.max(totalPlanned, totalActual)) }
                 ]}
                 cx="50%"
                 cy="50%"
@@ -227,9 +237,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
                 dataKey="value"
                 label={({name, percent}) => `${(percent * 100).toFixed(0)}%`}
               >
-                <Cell fill="#10b981" />
-                <Cell fill="#f59e0b" /> {/* Cambiato da grigio f1f5f9 a giallo f59e0b */}
-                <Cell fill="#3b82f6" />
+                <Cell fill={STATUS_COLORS.actual} />
+                <Cell fill={STATUS_COLORS.planned} />
+                <Cell fill={STATUS_COLORS.available} />
               </Pie>
               <Tooltip formatter={(value) => `€ ${Number(value).toLocaleString()}`} contentStyle={{borderRadius: '12px'}} />
               <Legend verticalAlign="bottom" height={36}/>
@@ -238,7 +248,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
         </div>
       </div>
 
-      {/* Nuova Tabella Riepilogo Analitico */}
+      {/* Tabella Riepilogo Analitico */}
       <div className="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
           <div className="p-5 border-b flex justify-between items-center bg-gray-50/50">
               <h3 className="font-bold text-gray-700 flex items-center gap-2">
