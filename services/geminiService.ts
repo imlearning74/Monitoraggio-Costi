@@ -2,43 +2,58 @@
 import { GoogleGenAI } from "@google/genai";
 import { AppData } from '../types';
 
-// Use the API key directly from process.env as per guidelines.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 export const analyzeProcurementData = async (data: AppData): Promise<string> => {
-  // Guidelines: Assume process.env.API_KEY is pre-configured and accessible.
-  if (!process.env.API_KEY) {
-    return "API Key Gemini non configurata (process.env.API_KEY).";
+  // Otteniamo la chiave API dall'ambiente (iniettata automaticamente)
+  const apiKey = process.env.API_KEY;
+  
+  if (!apiKey) {
+    console.error("Gemini API Key non configurata.");
+    return "Errore: Chiave API non configurata nel sistema. Contatta l'amministratore.";
   }
 
+  // Inizializzazione istanza come da linee guida
+  const ai = new GoogleGenAI({ apiKey });
+
+  // Preparazione dei dati sintetici per l'AI
   const supplierSummaries = data.suppliers.map(s => {
     const supplierOrders = data.orders.filter(o => o.supplierId === s.id);
-    const totalSpent = supplierOrders.reduce((acc, order) => {
+    const totalActual = supplierOrders.reduce((acc, order) => {
        return acc + order.items.reduce((sum, item) => sum + item.actualCost, 0);
     }, 0);
+    const totalPlanned = supplierOrders.reduce((acc, order) => {
+       return acc + order.items.reduce((sum, item) => sum + item.plannedCost, 0);
+    }, 0);
+
     return {
-      name: s.name,
-      budget: s.contractValue,
-      spent: totalSpent,
-      remaining: s.contractValue - totalSpent
+      fornitore: s.name,
+      budget_contrattuale: s.contractValue,
+      consuntivato: totalActual,
+      impegnato: Math.max(0, totalPlanned - totalActual),
+      residuo_libero: Math.max(0, s.contractValue - Math.max(totalPlanned, totalActual))
     };
   });
 
   const prompt = `
-    Analizza questi dati di formazione e fornitori. Fornisci 3 brevi spunti critici (max 2 righe l'uno).
+    Agisci come un senior financial controller. 
+    Analizza questi dati di spesa formazione e fornisci 3 brevi insight strategici in italiano (max 2 righe l'uno).
+    Usa un tono professionale e focalizzati su efficienza del budget e rischi di overspending.
+
     Dati: ${JSON.stringify(supplierSummaries)}
   `;
 
   try {
-    // Calling generateContent with the recommended model for basic text analysis tasks.
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
     });
-    // Accessing the .text property directly as it returns the generated string.
-    return response.text || "Nessuna risposta.";
-  } catch (error) {
-    console.error("Errore Gemini:", error);
-    return "Errore nell'analisi AI.";
+    
+    // .text è una proprietà getter, non un metodo
+    const textOutput = response.text;
+    if (!textOutput) throw new Error("Risposta vuota dal modello");
+    
+    return textOutput;
+  } catch (error: any) {
+    console.error("Errore API Gemini:", error);
+    return `L'analisi AI non è riuscita: ${error.message || 'Errore di comunicazione con il modello'}.`;
   }
 };
