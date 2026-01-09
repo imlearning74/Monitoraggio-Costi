@@ -1,9 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { AppData, PurchaseOrder } from '../types';
+import { AppData, PurchaseOrder, WorkflowStatus } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { analyzeProcurementData } from '../services/geminiService';
-import { Bot, RefreshCcw, Loader2, Filter, Calendar, ShieldCheck, Lock, Info, Key, AlertTriangle, List, TrendingUp } from 'lucide-react';
+import { 
+  Bot, RefreshCcw, Loader2, ShieldCheck, Lock, Key, AlertTriangle, 
+  List, TrendingUp, ChevronDown, ChevronRight, ExternalLink, BookOpen, ShoppingBag 
+} from 'lucide-react';
 
 interface DashboardProps {
   data: AppData;
@@ -20,6 +23,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   const [loadingAi, setLoadingAi] = useState(false);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>("");
   const [hasKey, setHasKey] = useState<boolean>(true);
+  const [expandedSuppliers, setExpandedSuppliers] = useState<Record<string, boolean>>({});
   
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -36,6 +40,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     checkKey();
   }, []);
 
+  const toggleSupplier = (id: string) => {
+    setExpandedSuppliers(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
   const handleOpenKeySelector = async () => {
     // @ts-ignore
     if (window.aistudio) {
@@ -48,8 +56,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
 
   const filteredSuppliers = data.suppliers.filter(s => {
     if (selectedSupplierId && s.id !== selectedSupplierId) return false;
-    // Se ci sono filtri data, potremmo voler filtrare i fornitori per data contratto, 
-    // ma solitamente i KPI della dashboard filtrano gli ORDINI per data.
     return true;
   });
 
@@ -73,7 +79,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       "Consuntivato": actual,
       "Impegnato": impegnatoNetto,
       "Budget": residuo,
-      consumoPercent
+      consumoPercent,
+      orders // Passiamo gli ordini filtrati per il drill-down
     };
   });
 
@@ -82,7 +89,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     setAiAnalysis(""); 
     try {
         const result = await analyzeProcurementData(data);
-        
         if (result === "CONFIG_REQUIRED" || result === "KEY_DISABLED") {
             setHasKey(false);
             setAiAnalysis(result === "KEY_DISABLED" 
@@ -98,7 +104,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     }
   };
 
-  // KPI Globali basati sui filtri
   const totalBudget = filteredSuppliers.reduce((a, b) => a + b.contractValue, 0);
   const totalPlanned = supplierStats.reduce((acc, s) => acc + s.Impegnato + s.Consuntivato, 0);
   const totalActual = supplierStats.reduce((acc, s) => acc + s.Consuntivato, 0);
@@ -246,18 +251,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
         </div>
       </div>
 
-      {/* Data Table Section */}
+      {/* Data Table Section with Drill-Down */}
       <div className="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
             <h3 className="text-lg font-bold text-gray-700 flex items-center gap-2">
-                <List size={18} className="text-primary"/> Dettaglio Analitico Fornitori
+                <List size={18} className="text-primary"/> Analisi Analitica Fornitori & Ordini
             </h3>
-            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Dati aggiornati in tempo reale</span>
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Espandi riga per dettaglio ordini</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
+                <th className="px-6 py-4 w-10"></th>
                 <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-wider">Fornitore</th>
                 <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-wider">Budget Contrattuale</th>
                 <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-wider text-blue-600">Impegnato</th>
@@ -268,41 +274,124 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {supplierStats.map((s) => (
-                <tr key={s.id} className="hover:bg-gray-50/80 transition-colors">
-                  <td className="px-6 py-4">
-                    <span className="font-bold text-gray-800">{s.name}</span>
-                  </td>
-                  <td className="px-6 py-4 font-mono text-xs text-gray-600">€ {s.contractValue.toLocaleString()}</td>
-                  <td className="px-6 py-4 font-mono text-xs font-bold text-blue-600">€ {s.Impegnato.toLocaleString()}</td>
-                  <td className="px-6 py-4 font-mono text-xs font-bold text-green-600">€ {s.Consuntivato.toLocaleString()}</td>
-                  <td className="px-6 py-4">
-                    <span className={`font-mono text-xs font-bold ${s.Budget <= 1000 ? 'text-red-600 bg-red-50' : 'text-amber-600 bg-amber-50'} px-2 py-1 rounded`}>
-                        € {s.Budget.toLocaleString()}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex flex-col gap-1">
-                        <div className="flex justify-between text-[10px] font-bold text-gray-400">
-                            <span>{s.consumoPercent.toFixed(1)}%</span>
+                <React.Fragment key={s.id}>
+                  {/* Riga Principale Fornitore */}
+                  <tr 
+                    className="hover:bg-gray-50/80 transition-colors cursor-pointer"
+                    onClick={() => toggleSupplier(s.id)}
+                  >
+                    <td className="px-6 py-4">
+                      {expandedSuppliers[s.id] ? <ChevronDown size={18} className="text-blue-500" /> : <ChevronRight size={18} className="text-gray-400" />}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-gray-800">{s.name}</span>
+                        <span className="text-[9px] text-gray-400 font-bold uppercase">{s.orders.length} Schede Ordine</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 font-mono text-xs text-gray-600">€ {s.contractValue.toLocaleString()}</td>
+                    <td className="px-6 py-4 font-mono text-xs font-bold text-blue-600">€ {s.Impegnato.toLocaleString()}</td>
+                    <td className="px-6 py-4 font-mono text-xs font-bold text-green-600">€ {s.Consuntivato.toLocaleString()}</td>
+                    <td className="px-6 py-4">
+                      <span className={`font-mono text-xs font-bold ${s.Budget <= 1000 ? 'text-red-600 bg-red-50' : 'text-amber-600 bg-amber-50'} px-2 py-1 rounded`}>
+                          € {s.Budget.toLocaleString()}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col gap-1">
+                          <div className="flex justify-between text-[10px] font-bold text-gray-400">
+                              <span>{s.consumoPercent.toFixed(1)}%</span>
+                          </div>
+                          <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
+                              <div 
+                                  className={`h-full transition-all duration-500 ${s.consumoPercent > 90 ? 'bg-red-500' : s.consumoPercent > 70 ? 'bg-amber-500' : 'bg-green-500'}`}
+                                  style={{ width: `${Math.min(100, s.consumoPercent)}%` }}
+                              ></div>
+                          </div>
+                      </div>
+                    </td>
+                  </tr>
+
+                  {/* Riga Dettaglio Ordini (Drill-down) */}
+                  {expandedSuppliers[s.id] && (
+                    <tr className="bg-gray-50/50 animate-in slide-in-from-top-2 duration-300">
+                      <td colSpan={7} className="px-12 py-6 border-l-4 border-blue-500">
+                        <div className="flex items-center gap-2 mb-4 text-xs font-bold text-blue-700 uppercase tracking-widest">
+                          <ShoppingBag size={14}/> Elenco Schede d'Acquisto Associate
                         </div>
-                        <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
-                            <div 
-                                className={`h-full transition-all duration-500 ${s.consumoPercent > 90 ? 'bg-red-500' : s.consumoPercent > 70 ? 'bg-amber-500' : 'bg-green-500'}`}
-                                style={{ width: `${Math.min(100, s.consumoPercent)}%` }}
-                            ></div>
-                        </div>
-                    </div>
-                  </td>
-                </tr>
+                        
+                        {s.orders.length === 0 ? (
+                          <div className="text-gray-400 text-xs italic py-4">Nessun ordine presente per il periodo selezionato.</div>
+                        ) : (
+                          <div className="grid grid-cols-1 gap-4">
+                            {s.orders.map((order: PurchaseOrder) => {
+                              const orderPlanned = order.items.reduce((sum, i) => sum + i.plannedCost, 0);
+                              const orderActual = order.items.reduce((sum, i) => sum + i.actualCost, 0);
+                              
+                              // Estrai i corsi unici in questo ordine
+                              const courseIds = [...new Set(order.items.map(item => {
+                                const ed = data.editions.find(e => e.id === item.editionId);
+                                return ed?.courseId;
+                              }).filter(Boolean))];
+                              
+                              const courseTitles = courseIds.map(cid => data.courses.find(c => c.id === cid)?.title).filter(Boolean);
+
+                              return (
+                                <div key={order.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-blue-200 transition-colors">
+                                  <div className="flex-1 space-y-2">
+                                    <div className="flex items-center gap-3">
+                                      <span className="font-bold text-gray-800 text-sm">{order.title}</span>
+                                      <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${order.status === WorkflowStatus.CLOSED ? 'bg-gray-200 text-gray-600' : 'bg-blue-100 text-blue-600'}`}>
+                                        {order.status}
+                                      </span>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                      {courseTitles.map((title, i) => (
+                                        <span key={i} className="flex items-center gap-1 text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-100">
+                                          <BookOpen size={10} /> {title}
+                                        </span>
+                                      ))}
+                                      {courseTitles.length === 0 && <span className="text-[10px] text-gray-400 italic">Nessun corso specifico (Acquisto generico)</span>}
+                                    </div>
+                                    <div className="text-[10px] text-gray-400 font-medium">
+                                      Creato il: {new Date(order.createdAt).toLocaleDateString()} • RDA: {order.rdaCode || 'N/A'} • ODA: {order.odaCode || 'N/A'}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-6">
+                                    <div className="text-right">
+                                      <div className="text-[9px] text-gray-400 font-bold uppercase">Pianificato</div>
+                                      <div className="text-xs font-mono font-bold text-blue-600">€ {orderPlanned.toLocaleString()}</div>
+                                    </div>
+                                    <div className="text-right">
+                                      <div className="text-[9px] text-gray-400 font-bold uppercase">Consuntivato</div>
+                                      <div className="text-xs font-mono font-bold text-green-600">€ {orderActual.toLocaleString()}</div>
+                                    </div>
+                                    <div className="pl-4 border-l border-gray-100">
+                                      <button className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all" title="Vai all'ordine">
+                                        <ExternalLink size={16} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))}
               {supplierStats.length === 0 && (
                 <tr>
-                    <td colSpan={6} className="px-6 py-20 text-center text-gray-400 italic">Nessun dato corrispondente ai filtri.</td>
+                    <td colSpan={7} className="px-6 py-20 text-center text-gray-400 italic">Nessun dato corrispondente ai filtri.</td>
                 </tr>
               )}
             </tbody>
             <tfoot className="bg-gray-50/50 font-bold border-t-2 border-gray-100">
                 <tr>
+                    <td className="px-6 py-4"></td>
                     <td className="px-6 py-4 text-gray-800">TOTALE COMPLESSIVO</td>
                     <td className="px-6 py-4 font-mono text-sm">€ {totalBudget.toLocaleString()}</td>
                     <td className="px-6 py-4 font-mono text-sm text-blue-600">€ {supplierStats.reduce((a,b) => a + b.Impegnato, 0).toLocaleString()}</td>
