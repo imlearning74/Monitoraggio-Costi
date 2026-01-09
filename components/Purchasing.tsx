@@ -31,7 +31,8 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
 
   // Auto-save state
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Use number for browser-based setTimeout reference to avoid NodeJS namespace error
+  const saveTimeoutRef = useRef<number | null>(null);
 
   // Helper to construct the full order object for saving
   const getFullOrderForSave = useCallback((order: Partial<PurchaseOrder>, lines: PurchaseLineItem[]) => {
@@ -70,9 +71,10 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
     if (!order.id || !order.supplierId) return;
 
     setSaveStatus('saving');
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    // Ensure timeout is cleared using browser window.clearTimeout
+    if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
 
-    saveTimeoutRef.current = setTimeout(async () => {
+    saveTimeoutRef.current = window.setTimeout(async () => {
       try {
         const fullOrder = getFullOrderForSave(order, lines);
         
@@ -88,7 +90,7 @@ export const Purchasing: React.FC<PurchasingProps> = ({ data, setData, mode }) =
         console.error("Auto-save failed:", error);
         setSaveStatus('error');
       }
-    }, 1000); // 1 second debounce
+    }, 1000) as unknown as number;
   }, [setData, getFullOrderForSave]);
 
   const handleCreateOrder = async () => {
